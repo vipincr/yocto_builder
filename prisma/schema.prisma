@@ -1,0 +1,200 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Auth.js required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+  gitHubAccount GitHubAccount?
+  
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// GitHub account linking (separate from OAuth account)
+model GitHubAccount {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  githubId     String   @unique @map("github_id")
+  username     String
+  accessToken  String   @map("access_token") @db.Text
+  refreshToken String?  @map("refresh_token") @db.Text
+  tokenExpiry  DateTime? @map("token_expiry")
+  scopes       String[]
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("github_accounts")
+}
+
+model Project {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  name          String
+  description   String?
+  githubRepoId  String   @map("github_repo_id")
+  githubRepoUrl String   @map("github_repo_url")
+  repoFullName  String   @map("repo_full_name") // owner/repo
+  defaultBranch String   @default("main") @map("default_branch")
+  yoctoVersion  YoctoVersion @default(SCARTHGAP) @map("yocto_version")
+  webhookId     String?  @map("webhook_id")
+  webhookSecret String?  @map("webhook_secret")
+  buildConfig   Json?    @map("build_config") // Custom bitbake config
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branches Branch[]
+  
+  @@unique([userId, githubRepoId])
+  @@map("projects")
+}
+
+enum YoctoVersion {
+  KIRKSTONE    // 4.0 LTS
+  SCARTHGAP    // 5.0 LTS
+  STYHEAD      // 5.1
+}
+
+model Branch {
+  id             String   @id @default(cuid())
+  projectId      String   @map("project_id")
+  name           String
+  autoBuild      Boolean  @default(true) @map("auto_build")
+  workspacePath  String   @map("workspace_path") // /builds/project_branch
+  sourcePath     String   @map("source_path")    // /builds/project_branch/source
+  buildPath      String   @map("build_path")     // /builds/project_branch/build
+  lastCommitSha  String?  @map("last_commit_sha")
+  lastBuildAt    DateTime? @map("last_build_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  builds  Build[]
+  
+  @@unique([projectId, name])
+  @@map("branches")
+}
+
+model Build {
+  id           String      @id @default(cuid())
+  branchId     String      @map("branch_id")
+  buildNumber  Int         @map("build_number")
+  commitSha    String      @map("commit_sha")
+  commitMessage String?    @map("commit_message")
+  status       BuildStatus @default(PENDING)
+  triggeredBy  BuildTrigger @default(MANUAL) @map("triggered_by")
+  logPath      String?     @map("log_path")
+  errorSummary Json?       @map("error_summary") // Parsed errors
+  artifactsPath String?    @map("artifacts_path")
+  containerId  String?     @map("container_id")
+  startedAt    DateTime?   @map("started_at")
+  finishedAt   DateTime?   @map("finished_at")
+  duration     Int?        // seconds
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  
+  @@unique([branchId, buildNumber])
+  @@map("builds")
+}
+
+enum BuildStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum BuildTrigger {
+  MANUAL
+  PUSH
+  WEBHOOK
+  RETRY
+}
+
+// Build queue for job management
+model BuildJob {
+  id        String   @id @default(cuid())
+  buildId   String   @unique @map("build_id")
+  priority  Int      @default(0)
+  attempts  Int      @default(0)
+  maxAttempts Int    @default(3) @map("max_attempts")
+  status    JobStatus @default(WAITING)
+  lockedAt  DateTime? @map("locked_at")
+  lockedBy  String?   @map("locked_by") // worker id
+  error     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  @@index([status, priority, createdAt])
+  @@map("build_jobs")
+}
+
+enum JobStatus {
+  WAITING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+

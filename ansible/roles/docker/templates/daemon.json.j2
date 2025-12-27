@@ -1,0 +1,18 @@
+{
+  "storage-driver": "{{ docker_storage_driver }}",
+  "log-driver": "{{ docker_log_driver }}",
+  "log-opts": {
+    "max-size": "{{ docker_log_max_size }}",
+    "max-file": "{{ docker_log_max_file }}"
+  },
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 65536,
+      "Soft": 65536
+    }
+  },
+  "live-restore": true,
+  "userland-proxy": false
+}
+

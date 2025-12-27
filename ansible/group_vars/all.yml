@@ -1,0 +1,68 @@
+---
+# System Configuration
+system_timezone: UTC
+system_locale: en_US.UTF-8
+
+# Application Configuration
+app_name: yocto_builder
+app_user: yocto
+app_group: yocto
+app_home: /opt/yocto_builder
+app_repo: https://github.com/your-org/yocto_builder.git
+app_branch: main
+
+# Directory Configuration
+builds_directory: /data/builds
+logs_directory: /var/log/yocto_builder
+
+# Node.js Configuration
+nodejs_version: "22"
+pm2_instances: max
+
+# PostgreSQL Configuration
+postgresql_version: "16"
+postgresql_db: yocto_builder
+postgresql_user: yocto_admin
+postgresql_password: "{{ vault_postgresql_password }}"
+postgresql_host: localhost
+postgresql_port: 5432
+
+# Docker Configuration
+docker_version: "27.0"
+docker_storage_driver: overlay2
+docker_log_driver: json-file
+docker_log_max_size: 100m
+docker_log_max_file: 3
+
+# Poky Docker Images
+poky_images:
+  - name: yocto-builder/poky-kirkstone
+    version: "4.0"
+    dockerfile: Dockerfile.kirkstone
+  - name: yocto-builder/poky-scarthgap
+    version: "5.0"
+    dockerfile: Dockerfile.scarthgap
+
+# Resource Limits (defaults)
+build_container_cpus: 6
+build_container_memory: "28g"
+build_container_storage: "500g"
+
+# Server Requirements
+min_cpus: 8
+min_memory_gb: 32
+min_storage_gb: 1000
+
+# Nginx Configuration
+nginx_server_name: "{{ inventory_hostname }}"
+nginx_ssl_enabled: true
+nginx_ssl_certificate: /etc/letsencrypt/live/{{ nginx_server_name }}/fullchain.pem
+nginx_ssl_certificate_key: /etc/letsencrypt/live/{{ nginx_server_name }}/privkey.pem
+
+# OAuth Configuration (from vault)
+github_client_id: "{{ vault_github_client_id }}"
+github_client_secret: "{{ vault_github_client_secret }}"
+google_client_id: "{{ vault_google_client_id }}"
+google_client_secret: "{{ vault_google_client_secret }}"
+nextauth_secret: "{{ vault_nextauth_secret }}"
+

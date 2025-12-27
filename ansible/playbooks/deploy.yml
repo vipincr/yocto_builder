@@ -1,0 +1,22 @@
+---
+- name: Deploy Yocto Builder Platform
+  hosts: all
+  become: yes
+  
+  pre_tasks:
+    - name: Display deployment info
+      debug:
+        msg: "Deploying to {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
+
+  roles:
+    - common
+    - docker
+    - postgresql
+    - nodejs
+    - yocto_builder
+
+  post_tasks:
+    - name: Display deployment status
+      debug:
+        msg: "Deployment completed! Application should be running."
+

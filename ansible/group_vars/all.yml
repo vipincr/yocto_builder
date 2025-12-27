@@ -17,7 +17,7 @@ logs_directory: /var/log/yocto_builder
 
 # Node.js Configuration
 nodejs_version: "22"
-pm2_instances: max
+pm2_instances: 1
 
 # PostgreSQL Configuration
 postgresql_version: "16"

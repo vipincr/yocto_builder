@@ -1,10 +1,10 @@
 module.exports = {
   apps: [{
     name: 'yocto-builder',
-    script: 'server.ts',
-    interpreter: 'tsx',
-    instances: '{{ pm2_instances }}',
-    exec_mode: 'cluster',
+    script: 'npm',
+    args: 'start',
+    instances: '{{ pm2_instances | default(1) }}',
+    exec_mode: '{{ "cluster" if (pm2_instances | default(1) | int) > 1 else "fork" }}',
     env: {
       NODE_ENV: 'production',
     },

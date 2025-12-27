@@ -1,0 +1,84 @@
+---
+- name: Provision AWS EC2 Instance for Yocto Builder
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  
+  vars:
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('ap-south-1') }}"
+    instance_type: "{{ lookup('env', 'AWS_EC2_INSTANCE_TYPE') | default('m5.2xlarge') }}"
+    key_name: "{{ lookup('env', 'AWS_EC2_KEY_NAME') | default('ec2_vipinr') }}"
+    key_path: "{{ lookup('env', 'AWS_EC2_KEY_PATH') | default(playbook_dir + '/../../.secrets/ec2_vipinr.pem') }}"
+    security_group_name: "yocto-builder-sg"
+    instance_name: "yocto-builder"
+    volume_size: 100
+    allocate_eip: true
+    ssh_allowed_cidr: "0.0.0.0/0"  # Change to your IP for production
+
+
+  tasks:
+    - name: Check AWS credentials are set
+      assert:
+        that:
+          - lookup('env', 'AWS_ACCESS_KEY_ID') != ''
+          - lookup('env', 'AWS_SECRET_ACCESS_KEY') != ''
+        fail_msg: "AWS credentials not set in environment"
+        success_msg: "AWS credentials found"
+
+    - name: Check SSH key exists
+      assert:
+        that:
+          - key_path | length > 0
+        fail_msg: "SSH key path not specified"
+      delegate_to: localhost
+      become: no
+
+    - name: Resolve SSH key path
+      set_fact:
+        resolved_key_path: "{{ (key_path | expanduser) if key_path.startswith('/') else (playbook_dir | dirname | dirname + '/' + key_path) }}"
+      delegate_to: localhost
+      become: no
+
+    - name: Verify SSH key file exists
+      stat:
+        path: "{{ resolved_key_path }}"
+      register: key_file
+      delegate_to: localhost
+      become: no
+
+    - name: Fail if SSH key doesn't exist
+      fail:
+        msg: "SSH key file not found at {{ resolved_key_path }}"
+      when: not key_file.stat.exists
+      delegate_to: localhost
+      become: no
+
+    - name: Set resolved key path for role
+      set_fact:
+        key_path: "{{ resolved_key_path }}"
+
+    - name: Include AWS EC2 provisioning role
+      include_role:
+        name: aws_ec2
+
+    - name: Save instance information to file
+      copy:
+        content: |
+          instance_id={{ hostvars[groups['aws_ec2_instances'][0]]['instance_id'] }}
+          public_ip={{ hostvars[groups['aws_ec2_instances'][0]]['public_ip'] }}
+          private_ip={{ hostvars[groups['aws_ec2_instances'][0]]['private_ip'] }}
+          instance_name={{ instance_name }}
+        dest: "{{ playbook_dir }}/../.aws-instance-info"
+        mode: '0600'
+      delegate_to: localhost
+      become: no
+      when: groups['aws_ec2_instances'] | length > 0
+
+    - name: Display connection information
+      debug:
+        msg:
+          - "EC2 Instance created successfully!"
+          - "Instance ID: {{ hostvars[groups['aws_ec2_instances'][0]]['instance_id'] }}"
+          - "Public IP: {{ hostvars[groups['aws_ec2_instances'][0]]['public_ip'] }}"
+          - "SSH: ssh -i {{ resolved_key_path }} ubuntu@{{ hostvars[groups['aws_ec2_instances'][0]]['public_ip'] }}"
+          - "Next: Run 'ansible-playbook -i inventory/aws-ec2-static.yml playbooks/aws-deploy.yml' to deploy"

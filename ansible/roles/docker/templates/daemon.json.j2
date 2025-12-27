@@ -1,9 +1,9 @@
 {
-  "storage-driver": "{{ docker_storage_driver }}",
-  "log-driver": "{{ docker_log_driver }}",
+  "storage-driver": "{{ docker_storage_driver | default('overlay2') }}",
+  "log-driver": "{{ docker_log_driver | default('json-file') }}",
   "log-opts": {
-    "max-size": "{{ docker_log_max_size }}",
-    "max-file": "{{ docker_log_max_file }}"
+    "max-size": "{{ docker_log_max_size | default('100m') }}",
+    "max-file": "{{ docker_log_max_file | default('3') }}"
   },
   "default-ulimits": {
     "nofile": {
@@ -15,4 +15,3 @@
   "live-restore": true,
   "userland-proxy": false
 }
-

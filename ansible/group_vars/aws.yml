@@ -1,0 +1,25 @@
+---
+# AWS-specific configuration
+aws_region: "ap-south-1"
+instance_type: "m5.2xlarge"
+key_name: "ec2_vipinr"
+key_path: "{{ playbook_dir }}/../.secrets/ec2_vipinr.pem"
+security_group_name: "yocto-builder-sg"
+instance_name: "yocto-builder"
+
+# SSH access (restrict to your IP for security)
+# Change this to your public IP or specific CIDR
+ssh_allowed_cidr: "0.0.0.0/0"  # WARNING: Change this to your IP for production
+
+# Nginx configuration
+nginx_server_name: "{{ ec2_public_ip | default('localhost') }}"
+nginx_ssl_enabled: true
+ssl_email: "admin@example.com"  # Change to your email for Let's Encrypt
+
+# Application URLs (will be updated after instance creation)
+nextauth_url: "https://{{ nginx_server_name }}"
+
+# Override builds directory for AWS
+builds_directory: "/data/builds"
+logs_directory: "/var/log/yocto_builder"
+

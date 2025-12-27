@@ -1,0 +1,147 @@
+---
+- name: Gather facts about existing security groups
+  amazon.aws.ec2_group_info:
+    region: "{{ aws_region }}"
+    filters:
+      group-name: "{{ security_group_name }}"
+  register: existing_sg
+  become: no
+
+- name: Get default VPC using Python
+  command: >
+    python3 -c "
+    import boto3, json, os;
+    ec2 = boto3.client('ec2', region_name='{{ aws_region }}');
+    vpcs = ec2.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}]);
+    print(vpcs['Vpcs'][0]['VpcId'] if vpcs['Vpcs'] else 'None')
+    "
+  register: default_vpc_result
+  become: no
+  when: existing_sg.security_groups | length == 0
+  changed_when: false
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_REGION: "{{ aws_region }}"
+
+- name: Set default VPC ID
+  set_fact:
+    default_vpc_id: "{{ default_vpc_result.stdout }}"
+  when: existing_sg.security_groups | length == 0 and default_vpc_result.stdout != 'None' and default_vpc_result.stdout != ''
+  become: no
+
+- name: Use existing security group or try to find default
+  set_fact:
+    security_group_id: "{{ existing_sg.security_groups[0].group_id }}"
+  when: existing_sg.security_groups | length > 0
+  become: no
+
+- name: Get default security group for VPC
+  script: files/get_default_sg.py
+  register: default_sg_result
+  when: existing_sg.security_groups | length == 0
+  become: no
+  changed_when: false
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_REGION: "{{ aws_region }}"
+    VPC_ID: "{{ default_vpc_id }}"
+
+- name: Use default security group if custom one doesn't exist
+  set_fact:
+    security_group_id: "{{ default_sg_result.stdout | trim }}"
+    use_default_sg: true
+  when: existing_sg.security_groups | length == 0 and default_sg_result.stdout is defined and default_sg_result.stdout != ''
+  become: no
+
+- name: Add rules to default security group
+  script: files/add_sg_rules.py
+  when: use_default_sg | default(false)
+  become: no
+  changed_when: false
+  failed_when: false
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_REGION: "{{ aws_region }}"
+    SG_ID: "{{ security_group_id }}"
+
+- name: Get existing security group ID
+  set_fact:
+    security_group_id: "{{ existing_sg.security_groups[0].group_id }}"
+  when: existing_sg.security_groups | length > 0
+  become: no
+
+- name: Fail if no security group found
+  fail:
+    msg: "Failed to find or create security group. VPC ID: {{ default_vpc_id | default('not found') }}. Please create a security group manually or grant ec2:CreateSecurityGroup permission."
+  when: security_group_id is not defined
+  become: no
+
+- name: Get Ubuntu 22.04 AMI ID from SSM Parameter Store
+  command: python3 -c "import boto3, os; ssm = boto3.client('ssm', region_name='{{ aws_region }}'); param = ssm.get_parameter(Name='/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'); print(param['Parameter']['Value'])"
+  register: ami_param_result
+  become: no
+  changed_when: false
+  failed_when: false
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_REGION: "{{ aws_region }}"
+
+- name: Set AMI ID - using Ubuntu 22.04 AMI for ap-south-1
+  set_fact:
+    ubuntu_ami_id: "ami-0a0f1259dd1c90938"
+  become: no
+
+- name: Create EC2 instance using Python
+  script: files/create_instance.py
+  register: ec2_instance_result
+  become: no
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_REGION: "{{ aws_region }}"
+    INSTANCE_TYPE: "{{ instance_type }}"
+    KEY_NAME: "{{ key_name }}"
+    IMAGE_ID: "{{ ubuntu_ami_id }}"
+    SG_ID: "{{ security_group_id }}"
+    INSTANCE_NAME: "{{ instance_name }}"
+    VOLUME_SIZE: "{{ volume_size | default(100) }}"
+
+- name: Parse EC2 instance result
+  set_fact:
+    ec2_instance_id: "{{ (ec2_instance_result.stdout | from_json).instance_id }}"
+    ec2_public_ip: "{{ (ec2_instance_result.stdout | from_json).public_ip }}"
+    ec2_private_ip: "{{ (ec2_instance_result.stdout | from_json).private_ip }}"
+  become: no
+
+- name: Wait for SSH to be available
+  wait_for:
+    host: "{{ ec2_public_ip }}"
+    port: 22
+    delay: 10
+    timeout: 300
+  become: no
+
+- name: Add EC2 instance to inventory
+  add_host:
+    name: "{{ instance_name }}"
+    ansible_host: "{{ ec2_public_ip }}"
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: "{{ key_path }}"
+    groups: aws_ec2_instances
+    instance_id: "{{ ec2_instance_id }}"
+    public_ip: "{{ ec2_public_ip }}"
+    private_ip: "{{ ec2_private_ip }}"
+  become: no
+
+- name: Display instance information
+  debug:
+    msg:
+      - "Instance ID: {{ ec2_instance_id }}"
+      - "Public IP: {{ ec2_public_ip }}"
+      - "Private IP: {{ ec2_private_ip }}"
+      - "SSH Command: ssh -i {{ key_path }} ubuntu@{{ ec2_public_ip }}"
+  become: no

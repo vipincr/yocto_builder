@@ -1,0 +1,27 @@
+---
+# Full deployment: Provision EC2 and Deploy Application
+- name: Provision AWS EC2 Instance
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  roles:
+    - role: aws_ec2
+      vars:
+        aws_region: "{{ aws_region | default('ap-south-1') }}"
+        instance_type: "{{ instance_type | default('m5.2xlarge') }}"
+        key_name: "{{ key_name | default('ec2_vipinr') }}"
+        key_path: "{{ key_path | default('../../.secrets/ec2_vipinr.pem') }}"
+        security_group_name: "{{ security_group_name | default('yocto-builder-sg') }}"
+        instance_name: "{{ instance_name | default('yocto-builder') }}"
+
+- name: Deploy Application to EC2
+  hosts: aws_ec2_instances
+  become: yes
+  roles:
+    - common
+    - docker
+    - postgresql
+    - nodejs
+    - nginx
+    - yocto_builder
+

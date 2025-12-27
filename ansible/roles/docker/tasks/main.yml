@@ -1,15 +1,32 @@
 ---
-- name: Add Docker GPG key
+- name: Install Docker (Amazon Linux)
+  yum:
+    name: docker
+    state: present
+  when: ansible_os_family == "RedHat"
+  notify: Restart Docker
+
+- name: Start and enable Docker (Amazon Linux)
+  systemd:
+    name: docker
+    enabled: yes
+    state: started
+  when: ansible_os_family == "RedHat"
+
+- name: Add Docker GPG key (Ubuntu/Debian)
   apt_key:
     url: https://download.docker.com/linux/ubuntu/gpg
     state: present
+  when: ansible_os_family == "Debian"
 
-- name: Add Docker repository
+- name: Add Docker repository (Ubuntu/Debian)
   apt_repository:
     repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
     state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
 
-- name: Install Docker
+- name: Install Docker (Ubuntu/Debian)
   apt:
     name:
       - docker-ce
@@ -19,6 +36,8 @@
       - docker-compose-plugin
     state: present
     update_cache: yes
+  when: ansible_os_family == "Debian"
+  notify: Restart Docker
 
 - name: Configure Docker daemon
   template:
@@ -29,13 +48,12 @@
 
 - name: Add app user to docker group
   user:
-    name: "{{ app_user }}"
+    name: "{{ app_user | default('yocto') }}"
     groups: docker
     append: yes
 
 - name: Ensure Docker is started
-  service:
+  systemd:
     name: docker
     state: started
     enabled: yes
-

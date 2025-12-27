@@ -1,0 +1,13 @@
+---
+- name: Create data directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: '0755'
+  loop:
+    - "{{ builds_directory | default('/data/builds') }}"
+    - "{{ logs_directory | default('/var/log/yocto_builder') }}"
+  when: builds_directory is defined or logs_directory is defined
+

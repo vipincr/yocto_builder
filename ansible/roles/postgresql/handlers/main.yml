@@ -1,6 +1,6 @@
 ---
 - name: Restart PostgreSQL
-  service:
+  systemd:
     name: postgresql
     state: restarted
 

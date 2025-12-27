@@ -1,0 +1,22 @@
+---
+- name: Create security group using Python script
+  script: create_sg.py
+  args:
+    creates: /tmp/sg_created
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_REGION: "{{ aws_region }}"
+    SECURITY_GROUP_NAME: "{{ security_group_name }}"
+    VPC_ID: "{{ default_vpc_id }}"
+    SSH_CIDR: "{{ ssh_allowed_cidr | default('0.0.0.0/0') }}"
+  register: sg_script_result
+  become: no
+  when: existing_sg.security_groups | length == 0
+
+- name: Parse security group ID from script output
+  set_fact:
+    security_group_id: "{{ sg_script_result.stdout | trim }}"
+  when: existing_sg.security_groups | length == 0 and sg_script_result.stdout is defined
+  become: no
+

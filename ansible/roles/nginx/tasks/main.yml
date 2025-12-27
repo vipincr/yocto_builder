@@ -1,0 +1,99 @@
+---
+- name: Install nginx (Amazon Linux)
+  yum:
+    name: nginx
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install nginx (Ubuntu/Debian)
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Install certbot for SSL (Amazon Linux)
+  yum:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install certbot for SSL (Ubuntu/Debian)
+  apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Create nginx configuration directory (Ubuntu/Debian)
+  file:
+    path: /etc/nginx/sites-available
+    state: directory
+    mode: '0755'
+  when: ansible_os_family == "Debian"
+
+- name: Configure nginx for Yocto Builder (Ubuntu/Debian)
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/yocto-builder
+    mode: '0644'
+  notify: Reload nginx
+  when: ansible_os_family == "Debian"
+
+- name: Configure nginx for Yocto Builder (Amazon Linux)
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/conf.d/yocto-builder.conf
+    mode: '0644'
+  notify: Reload nginx
+  when: ansible_os_family == "RedHat"
+
+- name: Enable site (Ubuntu/Debian)
+  file:
+    src: /etc/nginx/sites-available/yocto-builder
+    dest: /etc/nginx/sites-enabled/yocto-builder
+    state: link
+  notify: Reload nginx
+  when: ansible_os_family == "Debian"
+
+- name: Remove default nginx site (Ubuntu/Debian)
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+  when: ansible_os_family == "Debian"
+
+- name: Test nginx configuration
+  command: nginx -t
+  register: nginx_test
+  changed_when: false
+  failed_when: false
+  ignore_errors: yes
+
+- name: Start and enable nginx
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Setup SSL certificate with Let's Encrypt
+  command: >
+    certbot --nginx
+    -d {{ nginx_server_name }}
+    --non-interactive
+    --agree-tos
+    --email {{ ssl_email | default('admin@' + nginx_server_name) }}
+    --redirect
+  register: certbot_result
+  when: nginx_ssl_enabled | default(true)
+  ignore_errors: yes
+
+- name: Reload nginx after SSL setup
+  systemd:
+    name: nginx
+    state: reloaded
+  when: certbot_result.rc == 0
+

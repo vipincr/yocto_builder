@@ -1,45 +1,97 @@
 ---
-- name: Add PostgreSQL GPG key
+- name: Install PostgreSQL (Amazon Linux)
+  yum:
+    name:
+      - postgresql15-server
+      - postgresql15
+      - postgresql15-contrib
+      - python3-psycopg2
+    state: present
+  when: ansible_os_family == "RedHat"
+  notify: Restart PostgreSQL
+
+- name: Initialize PostgreSQL database (Amazon Linux)
+  command: postgresql-setup --initdb
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
+  when: ansible_os_family == "RedHat"
+  become_user: postgres
+
+- name: Start and enable PostgreSQL (Amazon Linux)
+  systemd:
+    name: postgresql
+    enabled: yes
+    state: started
+  when: ansible_os_family == "RedHat"
+
+- name: Add PostgreSQL GPG key (Ubuntu/Debian)
   apt_key:
     url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
     state: present
+  when: ansible_os_family == "Debian"
 
-- name: Add PostgreSQL repository
+- name: Add PostgreSQL repository (Ubuntu/Debian)
   apt_repository:
     repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
     state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
 
-- name: Install PostgreSQL
+- name: Install PostgreSQL (Ubuntu/Debian)
   apt:
     name:
-      - "postgresql-{{ postgresql_version }}"
-      - "postgresql-contrib-{{ postgresql_version }}"
-      - libpq-dev
-      - python3-psycopg2
+      - postgresql-{{ postgresql_version | default('16') }}
+      - postgresql-contrib-{{ postgresql_version | default('16') }}
     state: present
     update_cache: yes
+  when: ansible_os_family == "Debian"
+  notify: Restart PostgreSQL
 
-- name: Ensure PostgreSQL is started
-  service:
+- name: Start and enable PostgreSQL (Ubuntu/Debian)
+  systemd:
     name: postgresql
-    state: started
     enabled: yes
+    state: started
+  when: ansible_os_family == "Debian"
 
-- name: Create database user
-  become: yes
-  become_user: postgres
-  postgresql_user:
-    name: "{{ postgresql_user }}"
-    password: "{{ postgresql_password }}"
-    role_attr_flags: CREATEDB
-
-- name: Create database
-  become: yes
-  become_user: postgres
+- name: Create PostgreSQL database
   postgresql_db:
-    name: "{{ postgresql_db }}"
-    owner: "{{ postgresql_user }}"
-    encoding: UTF8
-    lc_collate: en_US.UTF-8
-    lc_ctype: en_US.UTF-8
+    name: "{{ postgresql_db | default('yocto_builder') }}"
+    state: present
+  become_user: "{{ 'postgres' if ansible_os_family == 'RedHat' else 'postgres' }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
 
+- name: Create PostgreSQL user
+  postgresql_user:
+    name: "{{ postgresql_user | default('yocto_admin') }}"
+    password: "{{ postgresql_password | default('changeme') }}"
+    role_attr_flags: CREATEDB,LOGIN
+    state: present
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Grant privileges to user on database
+  postgresql_privs:
+    db: "{{ postgresql_db | default('yocto_builder') }}"
+    privs: ALL
+    objs: "{{ postgresql_db | default('yocto_builder') }}"
+    type: database
+    roles: "{{ postgresql_user | default('yocto_admin') }}"
+    state: present
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Configure PostgreSQL to use password authentication
+  lineinfile:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backup: yes
+  when: ansible_os_family == "RedHat"
+  notify: Restart PostgreSQL
+  loop:
+    - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+ident', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+::1/128\s+ident', line: 'host    all             all             ::1/128                  scram-sha-256' }

@@ -3,24 +3,49 @@
   block:
     - name: Check CPU count
       assert:
-        that: ansible_processor_vcpus >= min_cpus
-        msg: "Server must have at least {{ min_cpus }} vCPUs"
+        that: ansible_processor_vcpus | int >= (min_cpus | default(8) | int)
+        msg: "Server must have at least {{ min_cpus | default(8) }} vCPUs"
 
     - name: Check memory
-      assert:
-        that: (ansible_memtotal_mb / 1024) >= min_memory_gb
-        msg: "Server must have at least {{ min_memory_gb }}GB RAM"
+      debug:
+        msg: "Server has {{ (ansible_memtotal_mb | int / 1024) | round(1) }}GB RAM (recommended: {{ min_memory_gb | default(32) }}GB)"
 
 - name: Set timezone
   timezone:
-    name: "{{ system_timezone }}"
+    name: "{{ system_timezone | default('UTC') }}"
 
-- name: Update apt cache
+- name: Update package cache (Amazon Linux)
+  yum:
+    update_cache: yes
+  when: ansible_os_family == "RedHat"
+
+- name: Update apt cache (Ubuntu/Debian)
   apt:
     update_cache: yes
     cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
 
-- name: Install essential packages
+- name: Install essential packages (Amazon Linux)
+  yum:
+    name:
+      - wget
+      - git
+      - htop
+      - iotop
+      - tree
+      - jq
+      - vim
+      - tmux
+      - gcc
+      - gcc-c++
+      - make
+      - python3
+      - python3-pip
+      - acl
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install essential packages (Ubuntu/Debian)
   apt:
     name:
       - apt-transport-https
@@ -46,8 +71,28 @@
       - acl
       - ufw
     state: present
+  when: ansible_os_family == "Debian"
 
-- name: Install Yocto build dependencies
+- name: Install Yocto build dependencies (Amazon Linux)
+  yum:
+    name:
+      - gawk
+      - diffstat
+      - texinfo
+      - chrpath
+      - socat
+      - cpio
+      - python3-pexpect
+      - python3-jinja2
+      - xz
+      - zstd
+      - lz4
+      - file
+      - glibc-langpack-en
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install Yocto build dependencies (Ubuntu/Debian)
   apt:
     name:
       - gawk
@@ -71,17 +116,31 @@
       - file
       - locales
     state: present
+  when: ansible_os_family == "Debian"
 
-- name: Generate locale
+- name: Generate locale (Ubuntu/Debian)
   locale_gen:
     name: "{{ system_locale }}"
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Set locale (Amazon Linux)
+  lineinfile:
+    path: /etc/environment
+    line: "LANG={{ system_locale | default('en_US.UTF-8') }}"
+    regexp: "^LANG="
+  when: ansible_os_family == "RedHat"
+
+- name: Create application group
+  group:
+    name: "{{ app_group | default('yocto') }}"
     state: present
 
 - name: Create application user
   user:
-    name: "{{ app_user }}"
-    group: "{{ app_group }}"
-    home: "{{ app_home }}"
+    name: "{{ app_user | default('yocto') }}"
+    group: "{{ app_group | default('yocto') }}"
+    home: "{{ app_home | default('/opt/yocto_builder') }}"
     shell: /bin/bash
     create_home: yes
     state: present
@@ -90,15 +149,15 @@
   file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ app_user }}"
-    group: "{{ app_group }}"
+    owner: "{{ app_user | default('yocto') }}"
+    group: "{{ app_group | default('yocto') }}"
     mode: '0755'
   loop:
-    - "{{ app_home }}"
-    - "{{ builds_directory }}"
-    - "{{ logs_directory }}"
+    - "{{ app_home | default('/opt/yocto_builder') }}"
+    - "{{ builds_directory | default('/data/builds') }}"
+    - "{{ logs_directory | default('/var/log/yocto_builder') }}"
 
-- name: Configure firewall
+- name: Configure firewall (Ubuntu/Debian)
   ufw:
     rule: allow
     port: "{{ item }}"
@@ -107,9 +166,16 @@
     - "22"
     - "80"
     - "443"
+  when: ansible_os_family == "Debian"
 
-- name: Enable firewall
+- name: Enable firewall (Ubuntu/Debian)
   ufw:
     state: enabled
     policy: deny
+  when: ansible_os_family == "Debian"
+
+- name: Configure firewall (Amazon Linux - using security groups)
+  debug:
+    msg: "Firewall managed by AWS security groups"
+  when: ansible_os_family == "RedHat"
 

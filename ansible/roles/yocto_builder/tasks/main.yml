@@ -1,61 +1,61 @@
 ---
 - name: Clone application repository
   git:
-    repo: "{{ app_repo }}"
-    dest: "{{ app_home }}/app"
-    version: "{{ app_branch }}"
+    repo: "{{ app_repo | default('https://github.com/your-org/yocto_builder.git') }}"
+    dest: "{{ app_home | default('/opt/yocto_builder') }}/app"
+    version: "{{ app_branch | default('main') }}"
     force: yes
   become: yes
-  become_user: "{{ app_user }}"
+  become_user: "{{ app_user | default('yocto') }}"
 
 - name: Install Node.js dependencies
   npm:
-    path: "{{ app_home }}/app"
+    path: "{{ app_home | default('/opt/yocto_builder') }}/app"
     state: present
   become: yes
-  become_user: "{{ app_user }}"
+  become_user: "{{ app_user | default('yocto') }}"
 
 - name: Create environment file
   template:
     src: env.j2
-    dest: "{{ app_home }}/app/.env"
-    owner: "{{ app_user }}"
-    group: "{{ app_group }}"
+    dest: "{{ app_home | default('/opt/yocto_builder') }}/app/.env"
+    owner: "{{ app_user | default('yocto') }}"
+    group: "{{ app_group | default('yocto') }}"
     mode: '0600'
 
 - name: Run Prisma migrations
   command: npx prisma migrate deploy
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_home | default('/opt/yocto_builder') }}/app"
   become: yes
-  become_user: "{{ app_user }}"
+  become_user: "{{ app_user | default('yocto') }}"
   environment:
-    DATABASE_URL: "postgresql://{{ postgresql_user }}:{{ postgresql_password }}@{{ postgresql_host }}:{{ postgresql_port }}/{{ postgresql_db }}"
+    DATABASE_URL: "postgresql://{{ postgresql_user | default('yocto_admin') }}:{{ postgresql_password | default('changeme') }}@{{ postgresql_host | default('localhost') }}:{{ postgresql_port | default('5432') }}/{{ postgresql_db | default('yocto_builder') }}"
 
 - name: Build Next.js application
   command: npm run build
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_home | default('/opt/yocto_builder') }}/app"
   become: yes
-  become_user: "{{ app_user }}"
+  become_user: "{{ app_user | default('yocto') }}"
 
 - name: Create PM2 ecosystem file
   template:
     src: ecosystem.config.js.j2
-    dest: "{{ app_home }}/app/ecosystem.config.js"
-    owner: "{{ app_user }}"
-    group: "{{ app_group }}"
+    dest: "{{ app_home | default('/opt/yocto_builder') }}/app/ecosystem.config.js"
+    owner: "{{ app_user | default('yocto') }}"
+    group: "{{ app_group | default('yocto') }}"
     mode: '0644'
 
 - name: Start application with PM2
   command: pm2 start ecosystem.config.js
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_home | default('/opt/yocto_builder') }}/app"
   become: yes
-  become_user: "{{ app_user }}"
+  become_user: "{{ app_user | default('yocto') }}"
 
 - name: Save PM2 process list
   command: pm2 save
   become: yes
-  become_user: "{{ app_user }}"
+  become_user: "{{ app_user | default('yocto') }}"
 

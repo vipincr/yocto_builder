@@ -1,0 +1,13 @@
+---
+# Default values - these are overridden by playbook vars
+# Do not use variable references here to avoid recursion
+instance_name: "yocto-builder"
+security_group_name: "yocto-builder-sg"
+instance_type: "m5.2xlarge"
+volume_size: 100
+allocate_eip: true
+aws_region: "ap-south-1"
+key_name: "ec2_vipinr"
+key_path: "../../.secrets/ec2_vipinr.pem"
+ssh_allowed_cidr: "0.0.0.0/0"
+

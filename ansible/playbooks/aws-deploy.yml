@@ -5,26 +5,27 @@
   
   vars:
     nginx_server_name: "{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
-    nextauth_url: "http://{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
+    nextauth_url: "https://{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
     builds_directory: "/data/builds"
     logs_directory: "/var/log/yocto_builder"
     key_path: "{{ lookup('env', 'AWS_EC2_KEY_PATH') | default('../../.secrets/ec2_vipinr.pem') }}"
-    app_repo: "https://github.com/vipincr/yocto_builder.git"
+    app_repo: "{{ lookup('env', 'APP_REPO') | default('https://github.com/your-org/yocto_builder.git') }}"
+    app_branch: "{{ lookup('env', 'APP_BRANCH') | default('main') }}"
     app_user: yocto
     app_group: yocto
     app_home: /opt/yocto_builder
     postgresql_user: yocto_admin
-    postgresql_password: "{{ vault_postgresql_password | default('changeme') }}"
+    postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default('changeme') }}"
     postgresql_host: localhost
     postgresql_port: 5432
     postgresql_db: yocto_builder
-    nextauth_secret: "{{ vault_nextauth_secret | default('changeme-secret-key-change-in-production') }}"
-    github_client_id: "{{ vault_github_client_id | default('') }}"
-    github_client_secret: "{{ vault_github_client_secret | default('') }}"
-    google_client_id: "{{ vault_google_client_id | default('') }}"
-    google_client_secret: "{{ vault_google_client_secret | default('') }}"
-    build_container_cpus: 6
-    build_container_memory: "28g"
+    nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default('changeme-secret-key-change-in-production') }}"
+    github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default('') }}"
+    github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default('') }}"
+    google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default('') }}"
+    google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default('') }}"
+    build_container_cpus: "{{ lookup('env', 'BUILD_CONTAINER_CPUS') | default(6) | int }}"
+    build_container_memory: "{{ lookup('env', 'BUILD_CONTAINER_MEMORY') | default('28g') }}"
     pm2_instances: 1
 
   pre_tasks:

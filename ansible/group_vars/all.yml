@@ -8,7 +8,7 @@ app_name: yocto_builder
 app_user: yocto
 app_group: yocto
 app_home: /opt/yocto_builder
-app_repo: https://github.com/your-org/yocto_builder.git
+app_repo: "{{ lookup('env', 'APP_REPO') | default('https://github.com/your-org/yocto_builder.git') }}"
 app_branch: main
 
 # Directory Configuration

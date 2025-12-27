@@ -1,26 +1,152 @@
 'use client';
 
 import { signIn } from 'next-auth/react';
-import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect } from 'react';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
+function CredentialsLogin({ callbackUrl }: { callbackUrl: string }) {
+  const router = useRouter();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const result = await signIn('credentials', {
+        username,
+        password,
+        callbackUrl,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        setError('Invalid username or password');
+      } else if (result?.ok) {
+        router.push(callbackUrl);
+      }
+    } catch (error: any) {
+      setError(error.message || 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label className="block text-white mb-2 text-sm">Username</label>
+        <input
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 border border-gray-700 focus:border-blue-500 focus:outline-none"
+          required
+        />
+      </div>
+      <div>
+        <label className="block text-white mb-2 text-sm">Password</label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 border border-gray-700 focus:border-blue-500 focus:outline-none"
+          required
+        />
+      </div>
+      {error && (
+        <div className="bg-red-600/20 border border-red-500 rounded-lg p-3">
+          <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      )}
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg disabled:opacity-50 transition-colors"
+      >
+        {loading ? 'Signing in...' : 'Sign in with Username'}
+      </button>
+    </form>
+  );
+}
+
 function LoginPageContent() {
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') || '/';
+  const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
+  const [hasProviders, setHasProviders] = useState(false);
+  const [providers, setProviders] = useState<{ google?: boolean; github?: boolean }>({});
+
+  useEffect(() => {
+    // Check if providers are available by trying to get them
+    // This is a client-side check, so we'll show buttons and let NextAuth handle errors
+    const checkProviders = async () => {
+      try {
+        // We'll show buttons and let signIn handle if providers aren't configured
+        setHasProviders(true);
+        // Check environment variables (client-side can't access, so we'll just show buttons)
+        setProviders({
+          google: !!process.env.NEXT_PUBLIC_GOOGLE_ENABLED || true, // Show by default
+          github: !!process.env.NEXT_PUBLIC_GITHUB_ENABLED || true, // Show by default
+        });
+      } catch (error) {
+        console.error('Error checking providers:', error);
+      }
+    };
+    checkProviders();
+  }, []);
+
+  const handleSignIn = async (provider: 'google' | 'github') => {
+    try {
+      await signIn(provider, { callbackUrl });
+    } catch (error) {
+      console.error(`Error signing in with ${provider}:`, error);
+      // Error will be handled by NextAuth
+    }
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
       <div className="w-full max-w-md rounded-lg bg-white/10 p-8 backdrop-blur-md shadow-xl">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-white mb-2">Yocto Builder</h1>
+          <Link href="/" className="text-3xl font-bold text-white mb-2 block hover:text-blue-400 transition-colors">
+            YoctoBuilder
+          </Link>
+          <p className="text-xs text-gray-400 mt-1">
+            by{' '}
+            <a
+              href="https://gramini.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 underline"
+            >
+              Gramini Labs
+            </a>
+          </p>
           <p className="text-gray-300">Sign in to continue</p>
         </div>
 
         <div className="space-y-4">
+          {/* Credentials Login */}
+          <CredentialsLogin callbackUrl={callbackUrl} />
+          
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-600"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white/10 text-gray-400">Or continue with</span>
+            </div>
+          </div>
+
           <button
-            onClick={() => signIn('google', { callbackUrl })}
+            onClick={() => handleSignIn('google')}
             className="w-full flex items-center justify-center gap-3 rounded-lg bg-white px-4 py-3 text-gray-900 font-medium hover:bg-gray-100 transition-colors"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -45,7 +171,7 @@ function LoginPageContent() {
           </button>
 
           <button
-            onClick={() => signIn('github', { callbackUrl })}
+            onClick={() => handleSignIn('github')}
             className="w-full flex items-center justify-center gap-3 rounded-lg bg-gray-800 px-4 py-3 text-white font-medium hover:bg-gray-700 transition-colors"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -53,6 +179,18 @@ function LoginPageContent() {
             </svg>
             Sign in with GitHub
           </button>
+        </div>
+
+        <div className="mt-6 text-center">
+          <Link href="/" className="text-gray-400 hover:text-white transition-colors text-sm">
+            ← Back to home
+          </Link>
+        </div>
+
+        <div className="mt-4 p-3 bg-yellow-500/20 border border-yellow-500/50 rounded-lg">
+          <p className="text-yellow-200 text-sm text-center">
+            Note: OAuth providers must be configured in the environment variables for authentication to work.
+          </p>
         </div>
       </div>
     </div>

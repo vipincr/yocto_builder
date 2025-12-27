@@ -17,8 +17,11 @@ app.prepare().then(() => {
       await handle(req, res, parsedUrl);
     } catch (err) {
       console.error('Error occurred handling', req.url, err);
-      res.statusCode = 500;
-      res.end('internal server error');
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack');
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.end('internal server error');
+      }
     }
   });
 
@@ -28,5 +31,8 @@ app.prepare().then(() => {
   httpServer.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
   });
+}).catch((err) => {
+  console.error('Failed to prepare Next.js app:', err);
+  process.exit(1);
 });
 

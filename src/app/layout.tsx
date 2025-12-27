@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Yocto Builder",
-  description: "Self-hosted CI/CD platform for Yocto Linux builds",
+  title: "YoctoBuilder",
+  description: "Self-hosted CI/CD platform for Yocto Linux builds by Gramini Labs",
 };
 
 export default function RootLayout({

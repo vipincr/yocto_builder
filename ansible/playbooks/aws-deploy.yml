@@ -1,24 +1,24 @@
 ---
-- name: Deploy Yocto Builder to AWS EC2
-  hosts: aws_ec2_instances
+- name: Deploy YoctoBuilder to AWS EC2
+  hosts: "{{ target_hosts | default('aws_ec2_instances') }}"
   become: yes
   
   vars:
     nginx_server_name: "{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
-    nextauth_url: "https://{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
-    builds_directory: "/data/builds"
-    logs_directory: "/var/log/yocto_builder"
+    nextauth_url: "{{ 'https://' if nginx_ssl_enabled | default(false) else 'http://' }}{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
+    builds_directory: "{{ lookup('env', 'BUILDS_DIRECTORY') | default('/data/builds') }}"
+    logs_directory: "{{ lookup('env', 'LOGS_DIRECTORY') | default('/var/log/yocto_builder') }}"
     key_path: "{{ lookup('env', 'AWS_EC2_KEY_PATH') | default('../../.secrets/ec2_vipinr.pem') }}"
     app_repo: "{{ lookup('env', 'APP_REPO') | default('https://github.com/your-org/yocto_builder.git') }}"
     app_branch: "{{ lookup('env', 'APP_BRANCH') | default('main') }}"
-    app_user: yocto
-    app_group: yocto
-    app_home: /opt/yocto_builder
-    postgresql_user: yocto_admin
+    app_user: "{{ lookup('env', 'APP_USER') | default('yocto') }}"
+    app_group: "{{ lookup('env', 'APP_GROUP') | default('yocto') }}"
+    app_home: "{{ lookup('env', 'APP_HOME') | default('/opt/yocto_builder') }}"
+    postgresql_user: "{{ lookup('env', 'POSTGRESQL_USER') | default('yocto_admin') }}"
     postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default('changeme') }}"
-    postgresql_host: localhost
-    postgresql_port: 5432
-    postgresql_db: yocto_builder
+    postgresql_host: "{{ lookup('env', 'POSTGRESQL_HOST') | default('localhost') }}"
+    postgresql_port: "{{ lookup('env', 'POSTGRESQL_PORT') | default('5432') | int }}"
+    postgresql_db: "{{ lookup('env', 'POSTGRESQL_DB') | default('yocto_builder') }}"
     nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default('changeme-secret-key-change-in-production') }}"
     github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default('') }}"
     github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default('') }}"
@@ -26,16 +26,23 @@
     google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default('') }}"
     build_container_cpus: "{{ lookup('env', 'BUILD_CONTAINER_CPUS') | default(6) | int }}"
     build_container_memory: "{{ lookup('env', 'BUILD_CONTAINER_MEMORY') | default('28g') }}"
-    pm2_instances: 1
+    pm2_instances: "{{ lookup('env', 'PM2_INSTANCES') | default(1) | int }}"
+    nginx_ssl_enabled: "{{ lookup('env', 'NGINX_SSL_ENABLED') | default('false') | bool }}"
 
   pre_tasks:
     - name: Display deployment info
       debug:
-        msg: "Deploying to {{ inventory_hostname }} ({{ ansible_host }})"
+        msg:
+          - "Deploying YoctoBuilder to {{ inventory_hostname }} ({{ ansible_host }})"
+          - "Repository: {{ app_repo }} (branch: {{ app_branch }})"
+          - "Application home: {{ app_home }}"
 
     - name: Wait for system to be ready
       wait_for_connection:
         timeout: 300
+
+    - name: Gather system facts
+      setup:
 
   roles:
     - common
@@ -53,10 +60,21 @@
     - name: Display deployment status
       debug:
         msg:
-          - "Deployment completed!"
-          - "Application URL: https://{{ hostvars[inventory_hostname]['public_ip'] }}"
-          - "SSH: ssh -i {{ key_path }} ubuntu@{{ hostvars[inventory_hostname]['public_ip'] }}"
-          - "Note: SSL certificate will be set up on first access or run certbot manually"
+          - "=========================================="
+          - "YoctoBuilder Deployment Complete!"
+          - "=========================================="
+          - "Instance: {{ inventory_hostname }} ({{ ansible_host }})"
+          - "Application URL: {{ nextauth_url }}"
+          - "SSH: ssh -i {{ key_path }} ec2-user@{{ ansible_host }}"
+          - "PM2 Status: Check with 'pm2 list' on the server"
+          - ""
+          - "Next steps:"
+          - "  1. Access the application at {{ nextauth_url }}"
+          - "  2. Complete initial setup if this is first deployment"
+          - "  3. Configure OAuth providers in settings (admin only)"
+          - ""
+          - "Note: SSL certificate will be configured automatically"
+          - "      or run certbot manually for custom domain"
 
     - name: Verify services are running
       systemd:

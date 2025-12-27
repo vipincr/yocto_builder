@@ -84,7 +84,8 @@ chmod 600 "$AWS_EC2_KEY_PATH"
 if [ -n "$EXISTING_INSTANCE" ]; then
     echo -e "${GREEN}Deploying to existing instance: $EXISTING_INSTANCE${NC}"
     
-    # Update inventory
+    # Update inventory with absolute path
+    ABS_KEY_PATH="$(cd "$(dirname "$AWS_EC2_KEY_PATH")" && pwd)/$(basename "$AWS_EC2_KEY_PATH")"
     cat > ansible/inventory/aws-ec2-static.yml << EOF
 all:
   children:
@@ -93,7 +94,7 @@ all:
         yocto-builder:
           ansible_host: $EXISTING_INSTANCE
           ansible_user: ec2-user
-          ansible_ssh_private_key_file: $AWS_EC2_KEY_PATH
+          ansible_ssh_private_key_file: $ABS_KEY_PATH
           public_ip: $EXISTING_INSTANCE
 EOF
 
@@ -108,7 +109,7 @@ EOF
         exit 1
     fi
 
-    # Deploy
+    # Deploy (update existing deployment)
     cd ansible
     ansible-playbook -i inventory/aws-ec2-static.yml playbooks/aws-deploy.yml
     
@@ -129,44 +130,13 @@ echo "Instance Type: $AWS_EC2_INSTANCE_TYPE"
 echo "Key Name: $AWS_EC2_KEY_NAME"
 echo ""
 
-# Step 1: Provision EC2 instance
-echo -e "${YELLOW}Step 1: Provisioning EC2 instance...${NC}"
+# Use the full deployment playbook which handles both provisioning and deployment
+echo -e "${YELLOW}Starting full deployment (provision + deploy)...${NC}"
 cd ansible
-ansible-playbook -i inventory/aws-ec2-static.yml playbooks/aws-provision.yml
+ansible-playbook playbooks/aws-full-deploy.yml
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Error: EC2 provisioning failed${NC}"
-    exit 1
-fi
-
-# Step 2: Get instance information
-if [ -f .aws-instance-info ]; then
-    source .aws-instance-info
-    if [ -n "$public_ip" ]; then
-        echo "Instance provisioned: $public_ip"
-        
-        # Update inventory
-        cat > inventory/aws-ec2-static.yml << EOF
-all:
-  children:
-    aws_ec2_instances:
-      hosts:
-        yocto-builder:
-          ansible_host: $public_ip
-          ansible_user: ec2-user
-          ansible_ssh_private_key_file: $AWS_EC2_KEY_PATH
-          public_ip: $public_ip
-EOF
-    fi
-fi
-
-# Step 3: Deploy application
-echo ""
-echo -e "${YELLOW}Step 2: Deploying application...${NC}"
-ansible-playbook -i inventory/aws-ec2-static.yml playbooks/aws-deploy.yml
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Error: Application deployment failed${NC}"
+    echo -e "${RED}Error: Deployment failed${NC}"
     exit 1
 fi
 

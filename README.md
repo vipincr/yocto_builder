@@ -160,12 +160,30 @@ The application will be available at http://localhost:3000
 ./deploy-aws.sh <instance-ip>
 ```
 
-The script will:
-1. Provision an EC2 instance (if new)
-2. Install all dependencies (PostgreSQL, Docker, Node.js, Nginx)
-3. Deploy the application
-4. Configure Nginx as reverse proxy
-5. Set up SSL certificates (Let's Encrypt)
+The deployment is **fully automated** and **idempotent** (safe to run multiple times):
+
+**First-time deployment:**
+1. Provisions EC2 instance with proper security groups
+2. Installs all system dependencies (PostgreSQL, Docker, Node.js, PM2, Nginx)
+3. Creates database and user automatically
+4. Clones application repository
+5. Installs Node.js dependencies
+6. Generates Prisma client
+7. Runs database migrations
+8. Builds Next.js application
+9. Configures Nginx as reverse proxy
+10. Starts application with PM2
+11. Sets up PM2 to start on boot
+
+**Subsequent deployments (updates):**
+1. Updates repository (git pull)
+2. Reinstalls dependencies if needed
+3. Regenerates Prisma client
+4. Runs new migrations
+5. Rebuilds application
+6. Restarts PM2 service
+
+All configuration is managed through Ansible playbooks - no manual commands or scripts needed!
 
 After deployment, access the application at `http://<instance-ip>` or `https://<instance-ip>`
 

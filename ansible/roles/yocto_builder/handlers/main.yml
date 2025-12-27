@@ -1,0 +1,9 @@
+---
+- name: restart application
+  command: pm2 restart yocto-builder
+  args:
+    chdir: "{{ app_home }}/app"
+  become: yes
+  become_user: "{{ app_user }}"
+  listen: restart application
+

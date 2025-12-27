@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     // Merge with existing (preserve values marked as ***)
     const finalEnv: Record<string, string> = { ...existingEnv };
     for (const [key, value] of Object.entries(updatedEnv)) {
-      if (value !== '***') {
+      if (value !== '***' && typeof value === 'string') {
         finalEnv[key] = value;
       }
     }

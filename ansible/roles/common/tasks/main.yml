@@ -1,0 +1,115 @@
+---
+- name: Verify system requirements
+  block:
+    - name: Check CPU count
+      assert:
+        that: ansible_processor_vcpus >= min_cpus
+        msg: "Server must have at least {{ min_cpus }} vCPUs"
+
+    - name: Check memory
+      assert:
+        that: (ansible_memtotal_mb / 1024) >= min_memory_gb
+        msg: "Server must have at least {{ min_memory_gb }}GB RAM"
+
+- name: Set timezone
+  timezone:
+    name: "{{ system_timezone }}"
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install essential packages
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - software-properties-common
+      - git
+      - wget
+      - unzip
+      - htop
+      - iotop
+      - ncdu
+      - tree
+      - jq
+      - vim
+      - tmux
+      - build-essential
+      - python3
+      - python3-pip
+      - python3-venv
+      - acl
+      - ufw
+    state: present
+
+- name: Install Yocto build dependencies
+  apt:
+    name:
+      - gawk
+      - diffstat
+      - texinfo
+      - chrpath
+      - socat
+      - cpio
+      - python3-pexpect
+      - python3-git
+      - python3-jinja2
+      - python3-subunit
+      - xz-utils
+      - debianutils
+      - iputils-ping
+      - libsdl1.2-dev
+      - xterm
+      - mesa-common-dev
+      - zstd
+      - liblz4-tool
+      - file
+      - locales
+    state: present
+
+- name: Generate locale
+  locale_gen:
+    name: "{{ system_locale }}"
+    state: present
+
+- name: Create application user
+  user:
+    name: "{{ app_user }}"
+    group: "{{ app_group }}"
+    home: "{{ app_home }}"
+    shell: /bin/bash
+    create_home: yes
+    state: present
+
+- name: Create application directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  loop:
+    - "{{ app_home }}"
+    - "{{ builds_directory }}"
+    - "{{ logs_directory }}"
+
+- name: Configure firewall
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "22"
+    - "80"
+    - "443"
+
+- name: Enable firewall
+  ufw:
+    state: enabled
+    policy: deny
+

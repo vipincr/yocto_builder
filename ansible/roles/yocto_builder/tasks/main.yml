@@ -1,0 +1,61 @@
+---
+- name: Clone application repository
+  git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_home }}/app"
+    version: "{{ app_branch }}"
+    force: yes
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Install Node.js dependencies
+  npm:
+    path: "{{ app_home }}/app"
+    state: present
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Create environment file
+  template:
+    src: env.j2
+    dest: "{{ app_home }}/app/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0600'
+
+- name: Run Prisma migrations
+  command: npx prisma migrate deploy
+  args:
+    chdir: "{{ app_home }}/app"
+  become: yes
+  become_user: "{{ app_user }}"
+  environment:
+    DATABASE_URL: "postgresql://{{ postgresql_user }}:{{ postgresql_password }}@{{ postgresql_host }}:{{ postgresql_port }}/{{ postgresql_db }}"
+
+- name: Build Next.js application
+  command: npm run build
+  args:
+    chdir: "{{ app_home }}/app"
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Create PM2 ecosystem file
+  template:
+    src: ecosystem.config.js.j2
+    dest: "{{ app_home }}/app/ecosystem.config.js"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+
+- name: Start application with PM2
+  command: pm2 start ecosystem.config.js
+  args:
+    chdir: "{{ app_home }}/app"
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Save PM2 process list
+  command: pm2 save
+  become: yes
+  become_user: "{{ app_user }}"
+

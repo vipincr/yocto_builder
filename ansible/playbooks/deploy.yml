@@ -1,22 +1,98 @@
 ---
-- name: Deploy Yocto Builder Platform
-  hosts: all
+# Unified deployment playbook for YoctoBuilder
+# Works for both Vagrant and AWS EC2 with platform-specific overrides
+#
+# Usage:
+#   - Vagrant: ansible-playbook -i inventory/vagrant.yml playbooks/deploy.yml -e platform=vagrant
+#   - AWS: ansible-playbook -i inventory/aws-ec2-static.yml playbooks/deploy.yml -e platform=aws
+
+- name: Deploy YoctoBuilder Platform
+  hosts: "{{ target_hosts | default('all') }}"
   become: yes
+  gather_facts: yes
   
+  vars:
+    # Platform will be set via -e platform=vagrant or -e platform=aws
+    # Default to vagrant if not specified
+    platform: "{{ platform | default('vagrant') }}"
+  
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/{{ platform }}.yml
+
   pre_tasks:
+
     - name: Display deployment info
       debug:
-        msg: "Deploying to {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
+        msg:
+          - "=========================================="
+          - "Deploying YoctoBuilder Platform"
+          - "=========================================="
+          - "Platform: {{ platform }}"
+          - "Host: {{ inventory_hostname }} ({{ ansible_host | default('N/A') }})"
+          - "Architecture: {{ ansible_facts['architecture'] }}"
+          - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "Deployment Type: {{ deployment_type | default('vagrant') }}"
+          - "Application Home: {{ app_home }}"
+          - "PostgreSQL user: {{ postgresql_user | default('unset') }}"
+          - "PostgreSQL password empty?: {{ (postgresql_password | default('') | length) == 0 }}"
+          - "PostgreSQL password is 'changeme'?: {{ (postgresql_password | default('') ) == 'changeme' }}"
+
+    - name: Detect architecture
+      set_fact:
+        docker_platform: "{{ 'linux/arm64' if (ansible_facts['architecture'] == 'aarch64' or ansible_facts['architecture'] == 'arm64') else 'linux/amd64' }}"
+        is_arm64: "{{ ansible_facts['architecture'] == 'aarch64' or ansible_facts['architecture'] == 'arm64' }}"
+        is_x86_64: "{{ ansible_facts['architecture'] == 'x86_64' or ansible_facts['architecture'] == 'amd64' }}"
+
+    - name: Update apt cache (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Wait for system to be ready (AWS)
+      wait_for_connection:
+        timeout: 300
+      when: platform == 'aws'
 
   roles:
     - common
     - docker
     - postgresql
     - nodejs
+    - { role: nginx, when: not (skip_nginx | default(false)) }
     - yocto_builder
 
   post_tasks:
+    - name: Verify services are running
+      systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - postgresql
+        - docker
+      when: item != 'nginx' or not (skip_nginx | default(false))
+      register: service_status
+      failed_when: false
+
     - name: Display deployment status
       debug:
-        msg: "Deployment completed! Application should be running."
-
+        msg:
+          - "=========================================="
+          - "YoctoBuilder Deployment Complete!"
+          - "=========================================="
+          - "Platform: {{ platform }}"
+          - "Host: {{ inventory_hostname }} ({{ ansible_host | default('N/A') }})"
+          - "Application URL: {{ nextauth_url | default('http://localhost:3000') }}"
+          - ""
+          - "Services Status:"
+          - "  - PostgreSQL: {{ 'running' if (service_status.results | selectattr('item', 'equalto', 'postgresql') | selectattr('changed', 'equalto', false) | list | length > 0) or (service_status.results | selectattr('item', 'equalto', 'postgresql') | selectattr('status', 'defined') | list | length > 0) else 'check manually' }}"
+          - "  - Docker: {{ 'running' if (service_status.results | selectattr('item', 'equalto', 'docker') | selectattr('changed', 'equalto', false) | list | length > 0) or (service_status.results | selectattr('item', 'equalto', 'docker') | selectattr('status', 'defined') | list | length > 0) else 'check manually' }}"
+          - "  - Nginx: {{ 'running' if not (skip_nginx | default(false)) and ((service_status.results | selectattr('item', 'equalto', 'nginx') | selectattr('changed', 'equalto', false) | list | length > 0) or (service_status.results | selectattr('item', 'equalto', 'nginx') | selectattr('status', 'defined') | list | length > 0)) else 'skipped' }}"
+          - ""
+          - "Next steps:"
+          - "  - Check PM2: pm2 list"
+          - "  - View logs: pm2 logs yocto-builder"
+          - "  - Access application at: {{ nextauth_url | default('http://localhost:3000') }}"
+          - ""
+          - "{% if platform == 'vagrant' %}SSH into VM: vagrant ssh{% elif platform == 'aws' %}SSH: ssh -i {{ lookup('env', 'AWS_EC2_KEY_PATH') | default('~/.ssh/key.pem') }} {{ ansible_user | default('ec2-user') }}@{{ ansible_host }}{% endif %}"

@@ -1,0 +1,16 @@
+---
+# Architecture detection task
+- name: Detect system architecture
+  set_fact:
+    system_arch: "{{ ansible_facts['architecture'] }}"
+    is_arm64: "{{ ansible_facts['architecture'] == 'aarch64' or ansible_facts['architecture'] == 'arm64' }}"
+    is_x86_64: "{{ ansible_facts['architecture'] == 'x86_64' or ansible_facts['architecture'] == 'amd64' }}"
+    docker_platform: "{{ 'linux/arm64' if (ansible_facts['architecture'] == 'aarch64' or ansible_facts['architecture'] == 'arm64') else 'linux/amd64' }}"
+
+- name: Display architecture information
+  debug:
+    msg:
+      - "Architecture: {{ system_arch }}"
+      - "Is ARM64: {{ is_arm64 }}"
+      - "Is x86_64: {{ is_x86_64 }}"
+      - "Docker platform: {{ docker_platform }}"

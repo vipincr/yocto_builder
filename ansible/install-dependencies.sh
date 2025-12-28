@@ -21,10 +21,14 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
         echo "Ansible already installed"
     fi
     
-    # Install Python dependencies
+    # Install Python dependencies (needed by amazon.aws modules on the controller)
     echo "Installing Python dependencies..."
-    python3 -m pip install --user boto3 botocore || {
-        echo "Warning: Could not install boto3/botocore. You may need to use a virtual environment."
+    python3 -m pip install --user boto3 botocore packaging >/dev/null 2>&1 || {
+        # Homebrew Python can be "externally managed" (PEP 668). Retry with the documented override.
+        python3 -m pip install --user --break-system-packages boto3 botocore packaging || {
+            echo "Warning: Could not install boto3/botocore/packaging. AWS provisioning may fail."
+            echo "Consider using a virtualenv, or install via Homebrew if available."
+        }
     }
 else
     # Linux installation
@@ -48,5 +52,5 @@ echo ""
 echo "Next steps:"
 echo "1. Ensure AWS credentials are in .env file"
 echo "2. Verify SSH key exists at .secrets/ec2_vipinr.pem"
-echo "3. Run: ./deploy-aws.sh"
+echo "3. Run: ./deploy.sh --aws"
 

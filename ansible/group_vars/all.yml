@@ -23,7 +23,7 @@ pm2_instances: 1
 postgresql_version: "16"
 postgresql_db: yocto_builder
 postgresql_user: yocto_admin
-postgresql_password: "{{ vault_postgresql_password }}"
+postgresql_password: "{{ vault_postgresql_password | default('changeme') }}"
 postgresql_host: localhost
 postgresql_port: 5432
 
@@ -43,9 +43,9 @@ poky_images:
     version: "5.0"
     dockerfile: Dockerfile.scarthgap
 
-# Resource Limits (defaults)
-build_container_cpus: 6
-build_container_memory: "28g"
+# Resource Limits (defaults, can be overridden)
+build_container_cpus: "{{ lookup('env', 'BUILD_CONTAINER_CPUS') | default(6) | int }}"
+build_container_memory: "{{ lookup('env', 'BUILD_CONTAINER_MEMORY') | default('28g') }}"
 build_container_storage: "500g"
 
 # Server Requirements
@@ -59,10 +59,13 @@ nginx_ssl_enabled: true
 nginx_ssl_certificate: /etc/letsencrypt/live/{{ nginx_server_name }}/fullchain.pem
 nginx_ssl_certificate_key: /etc/letsencrypt/live/{{ nginx_server_name }}/privkey.pem
 
-# OAuth Configuration (from vault)
-github_client_id: "{{ vault_github_client_id }}"
-github_client_secret: "{{ vault_github_client_secret }}"
-google_client_id: "{{ vault_google_client_id }}"
-google_client_secret: "{{ vault_google_client_secret }}"
-nextauth_secret: "{{ vault_nextauth_secret }}"
+# OAuth Configuration (from vault, with defaults)
+github_client_id: "{{ vault_github_client_id | default(lookup('env', 'GITHUB_CLIENT_ID') | default('')) }}"
+github_client_secret: "{{ vault_github_client_secret | default(lookup('env', 'GITHUB_CLIENT_SECRET') | default('')) }}"
+google_client_id: "{{ vault_google_client_id | default(lookup('env', 'GOOGLE_CLIENT_ID') | default('')) }}"
+google_client_secret: "{{ vault_google_client_secret | default(lookup('env', 'GOOGLE_CLIENT_SECRET') | default('')) }}"
+nextauth_secret: "{{ vault_nextauth_secret | default(lookup('env', 'NEXTAUTH_SECRET') | default('changeme-secret-key-change-in-production')) }}"
+
+# NextAuth URL (default, should be overridden in playbooks)
+nextauth_url: "{{ lookup('env', 'NEXTAUTH_URL') | default('http://localhost:3000') }}"
 

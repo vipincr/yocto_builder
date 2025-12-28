@@ -23,9 +23,34 @@ A self-hosted CI/CD platform for building Yocto Linux distributions with GitHub 
 ### Production Deployment
 - **Minimum Server Specs**: 8 vCPUs, 32GB RAM, 1TB storage
 - **Recommended**: AWS EC2 m5.2xlarge or equivalent
-- Ansible 2.14+ (for deployment)
+- Ansible 2.20+ (for deployment)
 
 ## Quick Start
+
+### Option 1: Local Development with Vagrant (Easiest)
+
+The easiest way to get started is using Vagrant, which sets up a complete development environment automatically.
+
+**Prerequisites:**
+- [Vagrant](https://www.vagrantup.com/downloads)
+- [VirtualBox](https://www.virtualbox.org/wiki/Downloads)
+
+**Setup:**
+```bash
+# Start/provision/update the VM and deploy YoctoBuilder (idempotent)
+./deploy.sh
+```
+
+The application will be available at **http://localhost:3000** once provisioning completes.
+
+**Vagrant Details:**
+- Uses ARM64 Ubuntu 24.04 box (`net9/ubuntu-24.04-arm64`) on ARM Macs
+- Uses x86_64 Ubuntu 22.04 box (`ubuntu/jammy64`) on Intel Macs
+- Requires VirtualBox 7.1+ for ARM Mac support
+- VM resources: 4GB RAM, 2 CPUs (development)
+- Port forwarding: 3000 (app), 5433 (PostgreSQL)
+
+### Option 2: Local Development (Manual)
 
 ### 1. Clone the Repository
 
@@ -101,21 +126,20 @@ The application will be available at http://localhost:3000
 
 ## Production Deployment
 
-### Local Machine Deployment
+### Deploy (single entrypoint)
 
-1. **Install Ansible dependencies:**
-   ```bash
-   cd ansible
-   ./install-dependencies.sh
-   ```
+Use `deploy.sh` for all deployments:
 
-2. **Configure inventory:**
-   Edit `ansible/inventory/local.yml` with your server details
+```bash
+# Vagrant (default)
+./deploy.sh
 
-3. **Deploy:**
-   ```bash
-   ansible-playbook -i inventory/local.yml playbooks/deploy.yml
-   ```
+# Vagrant (skip vagrant up)
+./deploy.sh --no-up
+
+# AWS (provision/reuse + deploy)
+./deploy.sh --aws
+```
 
 ### AWS EC2 Deployment
 
@@ -150,27 +174,19 @@ The application will be available at http://localhost:3000
 
 #### Deploy to AWS
 
-**Option 1: Provision new instance and deploy**
 ```bash
-./deploy-aws.sh
-```
-
-**Option 2: Deploy to existing instance**
-```bash
-./deploy-aws.sh <instance-ip>
+./deploy.sh --aws
 ```
 
 The deployment is **fully automated** and **idempotent** (safe to run multiple times):
 
 **First-time deployment:**
-1. Provisions EC2 instance with proper security groups
+1. Provisions (or reuses) an EC2 instance named **yocto-builder** (Name tag)
 2. Installs all system dependencies (PostgreSQL, Docker, Node.js, PM2, Nginx)
 3. Creates database and user automatically
-4. Clones application repository
-5. Installs Node.js dependencies
-6. Generates Prisma client
-7. Runs database migrations
-8. Builds Next.js application
+4. Builds the Next.js application **locally** and uploads a prebuilt tarball (no server-side build)
+5. Generates Prisma client (server)
+6. Runs database migrations (server)
 9. Configures Nginx as reverse proxy
 10. Starts application with PM2
 11. Sets up PM2 to start on boot
@@ -187,6 +203,22 @@ All configuration is managed through Ansible playbooks - no manual commands or s
 
 After deployment, access the application at `http://<instance-ip>` or `https://<instance-ip>`
 
+#### Deployment Details
+
+**Ansible Playbooks (internal):**
+- `ansible/playbooks/deploy.yml`: unified deployment (Vagrant + AWS targets)
+- `ansible/playbooks/aws-full-deploy.yml`: AWS provision/reuse + deploy
+
+**Ansible Roles:**
+- `common`: System configuration, user/group creation, directory setup
+- `docker`: Docker installation and configuration
+- `postgresql`: PostgreSQL installation, database/user creation
+- `nodejs`: Node.js and PM2 installation
+- `nginx`: Nginx reverse proxy and SSL setup
+- `yocto_builder`: Application deployment (supports both Vagrant and remote)
+
+**Idempotency:** All tasks are idempotent - safe to run multiple times. The deployment automatically detects existing resources and only updates what's changed.
+
 #### AWS IAM Policy
 
 Attach the IAM policy from `AWS-IAM-POLICY.json` to your IAM user. The policy includes permissions for:
@@ -200,18 +232,34 @@ Attach the IAM policy from `AWS-IAM-POLICY.json` to your IAM user. The policy in
 ```
 yocto_builder/
 ├── src/                    # Application source code
-│   ├── app/               # Next.js app directory
+│   ├── app/               # Next.js app directory (pages, API routes)
 │   ├── lib/               # Libraries and utilities
+│   │   ├── auth/          # Authentication (NextAuth)
+│   │   ├── build/          # Build execution and queue
+│   │   ├── db/            # Database queries and setup
+│   │   ├── docker/        # Docker integration
+│   │   ├── github/        # GitHub API integration
+│   │   ├── pm2/           # PM2 process management
+│   │   └── socket/        # WebSocket server
 │   └── types/             # TypeScript type definitions
-├── ansible/               # Ansible deployment playbooks
+├── ansible/               # Ansible deployment automation
 │   ├── playbooks/         # Deployment playbooks
-│   ├── roles/             # Ansible roles
+│   │   ├── aws-full-deploy.yml    # Complete AWS deployment
+│   │   ├── aws-deploy.yml         # Application deployment only
+│   │   └── vagrant-deploy.yml     # Vagrant VM deployment
+│   ├── roles/             # Reusable Ansible roles
+│   │   ├── common/        # System setup
+│   │   ├── docker/        # Docker installation
+│   │   ├── postgresql/    # PostgreSQL setup
+│   │   ├── nodejs/        # Node.js and PM2
+│   │   ├── nginx/         # Nginx reverse proxy
+│   │   └── yocto_builder/ # Application deployment
 │   └── inventory/         # Server inventory files
 ├── docker/                # Docker configurations
-│   └── poky/              # Yocto Poky Dockerfiles
+│   └── poky/              # Yocto Poky Dockerfiles (Kirkstone, Scarthgap)
 ├── prisma/                # Database schema and migrations
 ├── .env.example           # Environment variables template
-├── deploy-aws.sh          # AWS deployment script
+├── deploy.sh              # Single deployment entrypoint (Vagrant + AWS)
 └── AWS-IAM-POLICY.json    # AWS IAM policy document
 ```
 
@@ -274,6 +322,29 @@ lsof -ti:3000 | xargs kill -9
 - Verify IAM permissions match `AWS-IAM-POLICY.json`
 - Check security group allows SSH (port 22) and HTTP/HTTPS (ports 80/443)
 - Ensure SSH key has correct permissions: `chmod 600 .secrets/your-key.pem`
+- Check vCPU limits if instance creation fails (request increase via AWS support)
+- Verify AWS credentials are set in `.env`
+
+### Deployment Troubleshooting
+
+**Check deployment status:**
+```bash
+ssh -i .secrets/ec2_vipinr.pem ubuntu@<instance-ip>
+sudo -u yocto pm2 list
+sudo -u yocto pm2 logs yocto-builder
+```
+
+**Check service status:**
+```bash
+systemctl status postgresql
+systemctl status docker
+systemctl status nginx
+```
+
+**Re-run deployment:**
+```bash
+./deploy.sh --aws
+```
 
 ## License
 

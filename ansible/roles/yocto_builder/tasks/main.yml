@@ -7,12 +7,57 @@
     group: "{{ app_group }}"
     mode: '0755'
 
-- name: Check if repository exists
+- name: Set deployment type
+  set_fact:
+    deployment_type: "{{ deployment_type | default('vagrant' if app_repo == '/vagrant' else 'remote') }}"
+
+- name: Check if prebuilt tarball exists locally
+  stat:
+    path: "{{ playbook_dir | dirname | dirname }}/yocto-builder-deploy.tar.gz"
+  register: prebuilt_tarball
+  when: deployment_type == 'prebuilt'
+  delegate_to: localhost
+  become: no
+
+- name: Fail if prebuilt tarball not found
+  fail:
+    msg: "Prebuilt tarball not found at {{ playbook_dir | dirname | dirname }}/yocto-builder-deploy.tar.gz. Run ./scripts/build-and-package.sh first."
+  when: deployment_type == 'prebuilt' and not prebuilt_tarball.stat.exists
+
+- name: Upload prebuilt tarball to server
+  copy:
+    src: "{{ playbook_dir | dirname | dirname }}/yocto-builder-deploy.tar.gz"
+    dest: "/tmp/yocto-builder-deploy.tar.gz"
+    mode: '0644'
+  when: deployment_type == 'prebuilt'
+  delegate_to: localhost
+  become: no
+
+- name: Extract prebuilt tarball
+  unarchive:
+    src: /tmp/yocto-builder-deploy.tar.gz
+    dest: "{{ app_home }}/app"
+    remote_src: yes
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  when: deployment_type == 'prebuilt'
+  register: prebuilt_extract
+  notify: restart application
+
+- name: Clean up uploaded tarball
+  file:
+    path: /tmp/yocto-builder-deploy.tar.gz
+    state: absent
+  when: deployment_type == 'prebuilt'
+
+- name: Check if repository exists (remote deployment)
   stat:
     path: "{{ app_home }}/app/.git"
   register: repo_exists
+  when: deployment_type == 'remote'
 
-- name: Clone application repository (first time)
+- name: Clone application repository (first time - remote)
   git:
     repo: "{{ app_repo }}"
     dest: "{{ app_home }}/app"
@@ -21,9 +66,9 @@
     update: yes
   become: yes
   become_user: "{{ app_user }}"
-  when: not repo_exists.stat.exists
+  when: deployment_type == 'remote' and not repo_exists.stat.exists
 
-- name: Update application repository (subsequent deployments)
+- name: Update application repository (subsequent deployments - remote)
   git:
     repo: "{{ app_repo }}"
     dest: "{{ app_home }}/app"
@@ -32,28 +77,67 @@
     update: yes
   become: yes
   become_user: "{{ app_user }}"
-  when: repo_exists.stat.exists
+  when: deployment_type == 'remote' and repo_exists.stat.exists and app_repo | default('') | length > 0
   register: git_update
+  notify: restart application
+
+- name: Copy application from synced folder (Vagrant)
+  shell: |
+    mkdir -p {{ app_home }}/app
+    # Use rsync if available, otherwise cp
+    if command -v rsync > /dev/null 2>&1; then
+      rsync -av --delete \
+        --exclude='.git' \
+        --exclude='node_modules' \
+        --exclude='.next' \
+        --exclude='builds' \
+        --exclude='logs' \
+        --exclude='.env' \
+        --exclude='.secrets' \
+        --exclude='.aws-instance-info' \
+        --exclude='.vagrant' \
+        /vagrant/ {{ app_home }}/app/
+    else
+      cp -r /vagrant/* {{ app_home }}/app/ 2>/dev/null || true
+      rm -rf {{ app_home }}/app/.git {{ app_home }}/app/node_modules {{ app_home }}/app/.next || true
+      rm -rf {{ app_home }}/app/builds {{ app_home }}/app/logs {{ app_home }}/app/.env || true
+      rm -rf {{ app_home }}/app/.secrets {{ app_home }}/app/.aws-instance-info {{ app_home }}/app/.vagrant || true
+    fi
+    # Ensure proper ownership
+    chown -R {{ app_user }}:{{ app_group }} {{ app_home }}/app
+  async: 600
+  poll: 10
+  become: yes
+  become_user: "{{ app_user }}"
+  changed_when: true
+  when: deployment_type == 'vagrant'
   notify: restart application
 
 - name: Install Node.js dependencies
   npm:
     path: "{{ app_home }}/app"
     state: present
-    production: false
+    production: "{{ deployment_type == 'prebuilt' }}"
   become: yes
   become_user: "{{ app_user }}"
   register: npm_install
   notify: restart application
+  when: deployment_type != 'prebuilt' or not (prebuilt_extract is defined and prebuilt_extract.changed == false)
+
+- name: Set database URL for Prisma
+  set_fact:
+    database_url: "postgresql://{{ postgresql_user | default('yocto_admin') }}:{{ postgresql_password | default('changeme') | replace('@', '%40') | replace(':', '%3A') | replace('/', '%2F') | replace('?', '%3F') | replace('#', '%23') | replace('[', '%5B') | replace(']', '%5D') }}@{{ postgresql_host | default('localhost') }}:{{ postgresql_port | default(5432) }}/{{ postgresql_db | default('yocto_builder') }}"
 
 - name: Generate Prisma client
-  command: npm run db:generate
+  command: timeout 120 npm run db:generate
   args:
     chdir: "{{ app_home }}/app"
+  async: 180
+  poll: 5
   become: yes
   become_user: "{{ app_user }}"
   environment:
-    DATABASE_URL: "postgresql://{{ postgresql_user }}:{{ postgresql_password }}@{{ postgresql_host }}:{{ postgresql_port }}/{{ postgresql_db }}"
+    DATABASE_URL: "{{ database_url }}"
   register: prisma_generate
   changed_when: "'Generated Prisma Client' in prisma_generate.stdout"
 
@@ -67,25 +151,24 @@
   register: env_file
   notify: restart application
 
-- name: Check if database exists
-  postgresql_db:
-    name: "{{ postgresql_db }}"
-    login_user: "{{ postgresql_user }}"
-    login_password: "{{ postgresql_password }}"
-    login_host: "{{ postgresql_host }}"
-    login_port: "{{ postgresql_port }}"
-  register: db_exists
-  ignore_errors: yes
-  changed_when: false
+- name: Wait for PostgreSQL to be ready
+  wait_for:
+    host: "{{ postgresql_host }}"
+    port: "{{ postgresql_port }}"
+    delay: 5
+    timeout: 60
+  when: postgresql_host == 'localhost'
 
 - name: Run Prisma migrations
-  command: npm run db:deploy
+  command: timeout 60 npm run db:deploy
   args:
     chdir: "{{ app_home }}/app"
+  async: 90
+  poll: 5
   become: yes
   become_user: "{{ app_user }}"
   environment:
-    DATABASE_URL: "postgresql://{{ postgresql_user }}:{{ postgresql_password }}@{{ postgresql_host }}:{{ postgresql_port }}/{{ postgresql_db }}"
+    DATABASE_URL: "{{ database_url }}"
   register: prisma_migrate
   changed_when: "'migrated' in prisma_migrate.stdout or 'No migration' not in prisma_migrate.stdout"
   failed_when: prisma_migrate.rc != 0 and 'P1001' not in prisma_migrate.stderr
@@ -94,20 +177,35 @@
   stat:
     path: "{{ app_home }}/app/.next"
   register: build_exists
+  when: deployment_type != 'prebuilt'
 
 - name: Build Next.js application
-  command: npm run build
+  command: timeout 600 npm run build
   args:
     chdir: "{{ app_home }}/app"
+  async: 900
+  poll: 30
   become: yes
   become_user: "{{ app_user }}"
   environment:
     NODE_ENV: production
-    DATABASE_URL: "postgresql://{{ postgresql_user }}:{{ postgresql_password }}@{{ postgresql_host }}:{{ postgresql_port }}/{{ postgresql_db }}"
+    DATABASE_URL: "{{ database_url }}"
   register: build_result
   changed_when: "'Compiled successfully' in build_result.stdout or build_result.rc == 0"
   failed_when: build_result.rc != 0
   notify: restart application
+  when: deployment_type != 'prebuilt' and (not build_exists.stat.exists or deployment_type == 'vagrant')
+
+- name: Verify prebuilt application has .next directory
+  stat:
+    path: "{{ app_home }}/app/.next"
+  register: prebuilt_next_exists
+  when: deployment_type == 'prebuilt'
+
+- name: Fail if prebuilt application missing .next directory
+  fail:
+    msg: "Prebuilt application is missing .next directory. Build may have failed."
+  when: deployment_type == 'prebuilt' and not prebuilt_next_exists.stat.exists
 
 - name: Create PM2 ecosystem file
   template:
@@ -119,39 +217,36 @@
   register: pm2_config
   notify: restart application
 
-- name: Check if PM2 app is running
-  command: pm2 describe yocto-builder
+- name: Remove existing PM2 process (to apply updated ecosystem config)
+  command: pm2 delete yocto-builder
   args:
     chdir: "{{ app_home }}/app"
   become: yes
   become_user: "{{ app_user }}"
-  register: pm2_status
-  changed_when: false
   failed_when: false
+  changed_when: false
 
-- name: Start application with PM2 (first time)
-  command: pm2 start ecosystem.config.js
+- name: Start application under PM2 using ecosystem config
+  command: pm2 start ecosystem.config.js --only yocto-builder
   args:
     chdir: "{{ app_home }}/app"
   become: yes
   become_user: "{{ app_user }}"
-  when: pm2_status.rc != 0
-  register: pm2_start
+  register: pm2_start_or_restart
+  changed_when: true
 
 - name: Save PM2 process list
   command: pm2 save
   become: yes
   become_user: "{{ app_user }}"
-  when: pm2_start is defined and pm2_start.changed
+  when: pm2_start_or_restart is defined and pm2_start_or_restart.rc == 0
 
 - name: Ensure PM2 starts on boot
   command: pm2 startup systemd -u "{{ app_user }}" --hp "{{ app_home }}"
   become: yes
   become_user: "{{ app_user }}"
   register: pm2_startup
-  changed_when: "'PM2' in pm2_startup.stdout"
   failed_when: false
-  when: pm2_startup.rc == 0 or pm2_startup.rc == 1
 
 - name: Verify PM2 application is running
   command: pm2 describe yocto-builder

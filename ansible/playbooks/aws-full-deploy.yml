@@ -5,27 +5,81 @@
   hosts: localhost
   connection: local
   gather_facts: no
+  become: no
   
   vars:
-    instance_info_file: "{{ playbook_dir }}/../.aws-instance-info"
+    instance_info_file: "{{ playbook_dir | dirname | dirname }}/.aws-instance-info"
     
   tasks:
-    - name: Check if instance already exists
+    - name: Lookup existing EC2 instance by Name tag
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region | default('ap-south-1') }}"
+        filters:
+          "tag:Name": "{{ instance_name | default('yocto-builder') }}"
+          instance-state-name: [running, stopped]
+      register: existing_instance
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+        AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+        AWS_REGION: "{{ aws_region | default('ap-south-1') }}"
+      failed_when: false
+      changed_when: false
+
+    - name: Check if instance already exists in file
       stat:
         path: "{{ instance_info_file }}"
       register: instance_info_exists
+      delegate_to: localhost
 
-    - name: Load existing instance info
+    - name: Load existing instance info from file
       include_vars:
         file: "{{ instance_info_file }}"
       when: instance_info_exists.stat.exists
       register: loaded_instance_info
       failed_when: false
 
-    - name: Provision EC2 instance (if needed)
+    - name: Use existing instance from AWS lookup
+      set_fact:
+        target_instance_id: "{{ existing_instance.instances[0].instance_id }}"
+        target_instance_ip: "{{ existing_instance.instances[0].public_ip_address | default(existing_instance.instances[0].private_ip_address) }}"
+        target_instance_state: "{{ existing_instance.instances[0].state.name }}"
+      when: existing_instance.instances | default([]) | length > 0
+
+    - name: Start existing stopped instance
+      amazon.aws.ec2_instance:
+        instance_ids:
+          - "{{ target_instance_id }}"
+        state: running
+        wait: yes
+        wait_timeout: 600
+      when: target_instance_id is defined and target_instance_state | default('') == 'stopped'
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+        AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+        AWS_REGION: "{{ aws_region | default('ap-south-1') }}"
+      register: instance_started
+
+    - name: Get instance details after starting
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region | default('ap-south-1') }}"
+        instance_ids:
+          - "{{ target_instance_id }}"
+      when: target_instance_id is defined and target_instance_state | default('') == 'stopped'
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+        AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+        AWS_REGION: "{{ aws_region | default('ap-south-1') }}"
+      register: instance_details_after_start
+
+    - name: Update instance IP after starting
+      set_fact:
+        target_instance_ip: "{{ instance_details_after_start.instances[0].public_ip_address | default(instance_details_after_start.instances[0].private_ip_address) }}"
+      when: target_instance_id is defined and target_instance_state | default('') == 'stopped' and instance_details_after_start.instances | default([]) | length > 0
+
+    - name: Provision new EC2 instance (if no existing instance found)
       include_role:
         name: aws_ec2
-      when: not instance_info_exists.stat.exists or not (loaded_instance_info | default({})).instance_id | default('') | length > 0
+      when: existing_instance.instances | default([]) | length == 0 and (not instance_info_exists.stat.exists or not (loaded_instance_info | default({})).instance_id | default('') | length > 0)
       tags:
         - provision
 
@@ -35,15 +89,24 @@
       when: not instance_info_exists.stat.exists or not (loaded_instance_info | default({})).instance_id | default('') | length > 0
       register: new_instance_info
 
-    - name: Set instance variables
+    - name: Set instance variables from file (if not already set from AWS lookup)
       set_fact:
         target_instance_ip: "{{ (new_instance_info | default({})).public_ip | default((loaded_instance_info | default({})).public_ip | default('')) }}"
         target_instance_id: "{{ (new_instance_info | default({})).instance_id | default((loaded_instance_info | default({})).instance_id | default('')) }}"
+      when: target_instance_id is not defined
 
     - name: Fail if no instance IP
       fail:
         msg: "No instance IP found. Provision an instance first."
-      when: target_instance_ip | length == 0
+      when: target_instance_ip | default('') | length == 0
+
+    - name: Save instance info to file
+      copy:
+        content: |
+          instance_id={{ target_instance_id }}
+          public_ip={{ target_instance_ip }}
+        dest: "{{ instance_info_file }}"
+      delegate_to: localhost
 
     - name: Update inventory with instance IP
       copy:
@@ -54,10 +117,10 @@
                 hosts:
                   yocto-builder:
                     ansible_host: {{ target_instance_ip }}
-                    ansible_user: ec2-user
-                    ansible_ssh_private_key_file: {{ lookup('env', 'AWS_EC2_KEY_PATH') | default('../../.secrets/ec2_vipinr.pem') }}
+                    ansible_user: ubuntu
+                    ansible_ssh_private_key_file: {{ key_path }}
                     public_ip: {{ target_instance_ip }}
-        dest: "{{ playbook_dir }}/inventory/aws-ec2-static.yml"
+        dest: "{{ playbook_dir | dirname }}/inventory/aws-ec2-static.yml"
       delegate_to: localhost
 
     - name: Wait for SSH to be available
@@ -73,39 +136,14 @@
   become: yes
   gather_facts: yes
   
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/aws.yml
+  
   vars:
-    nginx_server_name: "{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
-    nextauth_url: "{{ 'https://' if nginx_ssl_enabled | default(false) else 'http://' }}{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
-    builds_directory: "{{ lookup('env', 'BUILDS_DIRECTORY') | default('/data/builds') }}"
-    logs_directory: "{{ lookup('env', 'LOGS_DIRECTORY') | default('/var/log/yocto_builder') }}"
-    app_repo: "{{ lookup('env', 'APP_REPO') | default('https://github.com/your-org/yocto_builder.git') }}"
-    app_branch: "{{ lookup('env', 'APP_BRANCH') | default('main') }}"
-    app_user: "{{ lookup('env', 'APP_USER') | default('yocto') }}"
-    app_group: "{{ lookup('env', 'APP_GROUP') | default('yocto') }}"
-    app_home: "{{ lookup('env', 'APP_HOME') | default('/opt/yocto_builder') }}"
-    postgresql_user: "{{ lookup('env', 'POSTGRESQL_USER') | default('yocto_admin') }}"
-    postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default('changeme') }}"
-    postgresql_host: "{{ lookup('env', 'POSTGRESQL_HOST') | default('localhost') }}"
-    postgresql_port: "{{ lookup('env', 'POSTGRESQL_PORT') | default('5432') | int }}"
-    postgresql_db: "{{ lookup('env', 'POSTGRESQL_DB') | default('yocto_builder') }}"
-    nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default('changeme-secret-key-change-in-production') }}"
-    github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default('') }}"
-    github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default('') }}"
-    google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default('') }}"
-    google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default('') }}"
-    build_container_cpus: "{{ lookup('env', 'BUILD_CONTAINER_CPUS') | default(6) | int }}"
-    build_container_memory: "{{ lookup('env', 'BUILD_CONTAINER_MEMORY') | default('28g') }}"
-    pm2_instances: "{{ lookup('env', 'PM2_INSTANCES') | default(1) | int }}"
-    nginx_ssl_enabled: "{{ lookup('env', 'NGINX_SSL_ENABLED') | default('false') | bool }}"
+    platform: aws
   
   pre_tasks:
-    - name: Display deployment info
-      debug:
-        msg:
-          - "Deploying YoctoBuilder to {{ inventory_hostname }} ({{ ansible_host }})"
-          - "Repository: {{ app_repo }} (branch: {{ app_branch }})"
-          - "Application home: {{ app_home }}"
-
     - name: Wait for system to be ready
       wait_for_connection:
         timeout: 300
@@ -127,7 +165,7 @@
           - "=========================================="
           - "Instance: {{ inventory_hostname }} ({{ ansible_host }})"
           - "Application URL: {{ nextauth_url }}"
-          - "SSH: ssh -i {{ lookup('env', 'AWS_EC2_KEY_PATH') | default('../../.secrets/ec2_vipinr.pem') }} ec2-user@{{ ansible_host }}"
+          - "SSH: ssh -i {{ key_path }} ubuntu@{{ ansible_host }}"
           - "PM2 Status: Check with 'pm2 list' on the server"
           - ""
           - "Next steps:"

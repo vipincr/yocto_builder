@@ -24,9 +24,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if username already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { username },
-    });
+    // Note: Using raw query since username might not be in Prisma's generated types
+    const existingUser = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM users WHERE username = ${username} LIMIT 1
+    `.then(rows => rows[0] ? { id: rows[0].id } : null);
 
     if (existingUser) {
       return NextResponse.json(

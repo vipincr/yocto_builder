@@ -20,7 +20,7 @@ if not all([key_name, image_id, sg_id]):
 ec2 = boto3.client('ec2', region_name=region)
 
 try:
-    # Create instance
+    # Create instance with Name tag
     response = ec2.run_instances(
         ImageId=image_id,
         MinCount=1,
@@ -38,17 +38,15 @@ try:
                 }
             }
         ],
-        # Tags removed - requires ec2:CreateTags permission
-        # TagSpecifications=[
-        #     {
-        #         'ResourceType': 'instance',
-        #         'Tags': [
-        #             {'Key': 'Name', 'Value': instance_name},
-        #             {'Key': 'Application', 'Value': 'yocto-builder'},
-        #             {'Key': 'Environment', 'Value': 'production'}
-        #         ]
-        #     }
-        # ]
+        TagSpecifications=[
+            {
+                'ResourceType': 'instance',
+                'Tags': [
+                    {'Key': 'Name', 'Value': instance_name},
+                    {'Key': 'Application', 'Value': 'yocto-builder'}
+                ]
+            }
+        ]
     )
     
     instance_id = response['Instances'][0]['InstanceId']

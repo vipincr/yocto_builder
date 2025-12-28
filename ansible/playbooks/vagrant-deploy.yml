@@ -1,0 +1,73 @@
+---
+- name: Deploy YoctoBuilder to Vagrant VM
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Vagrant-specific overrides
+    nginx_server_name: "localhost"
+    nextauth_url: "http://localhost:3000"
+    app_repo: "/vagrant"
+    min_cpus: 2
+    min_memory_gb: 4
+    build_container_cpus: 2
+    build_container_memory: "4g"
+    # NOTE: lookup('env', ...) returns "" when unset; default(..., true) treats "" as undefined.
+    postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default('vagrant_dev_password', true) }}"
+    nginx_ssl_enabled: false
+    skip_nginx: true  # Skip nginx for Vagrant - run directly on port 3000
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  pre_tasks:
+    - name: Set ANSIBLE_ROLES_PATH
+      set_fact:
+        ansible_roles_path: "/vagrant/ansible/roles"
+    
+    - name: Override min_cpus for Vagrant (development environment)
+      set_fact:
+        min_cpus: 2
+    
+    - name: Detect architecture
+      set_fact:
+        docker_platform: "{{ 'linux/arm64' if (ansible_architecture == 'aarch64' or ansible_architecture == 'arm64') else 'linux/amd64' }}"
+        is_arm64: "{{ ansible_architecture == 'aarch64' or ansible_architecture == 'arm64' }}"
+    
+    - name: Display architecture and deployment info
+      debug:
+        msg:
+          - "Deploying YoctoBuilder to Vagrant VM"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Docker platform: {{ docker_platform }}"
+          - "Application will be available at http://localhost:3000"
+    
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+  roles:
+    - common
+    - docker
+    - postgresql
+    - nodejs
+    - { role: nginx, when: not skip_nginx | default(false) }
+    - yocto_builder
+
+  post_tasks:
+    - name: Display deployment status
+      debug:
+        msg:
+          - "=========================================="
+          - "YoctoBuilder Vagrant Deployment Complete!"
+          - "=========================================="
+          - "Application URL: http://localhost:3000"
+          - "Application URL (VM IP): http://192.168.56.10:3000"
+          - ""
+          - "SSH into VM: vagrant ssh"
+          - "Check PM2: sudo -u yocto pm2 list"
+          - "View logs: sudo -u yocto pm2 logs yocto-builder"
+

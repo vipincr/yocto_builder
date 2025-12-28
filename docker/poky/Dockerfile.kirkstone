@@ -1,5 +1,6 @@
 # docker/poky/Dockerfile.kirkstone
-FROM ubuntu:22.04
+# Use multi-platform base image
+FROM --platform=$BUILDPLATFORM ubuntu:22.04
 
 LABEL maintainer="Yocto Builder"
 LABEL yocto.version="kirkstone"

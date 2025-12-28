@@ -1,12 +1,14 @@
 module.exports = {
   apps: [{
     name: 'yocto-builder',
-    script: 'npm',
-    args: 'start',
+    // Run Next.js in production mode without tsx/custom-server (tsx is a devDependency)
+    script: './node_modules/.bin/next',
+    args: 'start -H 0.0.0.0 -p 3000',
     instances: '{{ pm2_instances | default(1) }}',
     exec_mode: '{{ "cluster" if (pm2_instances | default(1) | int) > 1 else "fork" }}',
     env: {
       NODE_ENV: 'production',
+      PORT: '3000',
     },
     error_file: '{{ logs_directory }}/pm2-error.log',
     out_file: '{{ logs_directory }}/pm2-out.log',

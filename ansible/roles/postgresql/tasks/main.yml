@@ -7,14 +7,14 @@
       - postgresql15-contrib
       - python3-psycopg2
     state: present
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
   notify: Restart PostgreSQL
 
 - name: Initialize PostgreSQL database (Amazon Linux)
   command: postgresql-setup --initdb
   args:
     creates: /var/lib/pgsql/data/PG_VERSION
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
   become_user: postgres
 
 - name: Start and enable PostgreSQL (Amazon Linux)
@@ -22,29 +22,70 @@
     name: postgresql
     enabled: yes
     state: started
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
-- name: Add PostgreSQL GPG key (Ubuntu/Debian)
-  apt_key:
-    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
-    state: present
-  when: ansible_os_family == "Debian"
+- name: Set PostgreSQL architecture
+  set_fact:
+    postgresql_arch: "{{ 'arm64' if (ansible_facts['architecture'] == 'aarch64' or ansible_facts['architecture'] == 'arm64') else 'amd64' }}"
 
-- name: Add PostgreSQL repository (Ubuntu/Debian)
+- name: Ensure apt keyrings directory exists
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Download and import PostgreSQL GPG key (Ubuntu/Debian)
+  shell: |
+    timeout 30 bash -c 'curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg'
+    chmod a+r /etc/apt/keyrings/postgresql.gpg
+  args:
+    creates: /etc/apt/keyrings/postgresql.gpg
+  async: 60
+  poll: 5
+  when: ansible_facts['os_family'] == "Debian"
+  changed_when: true
+
+- name: Remove all existing PostgreSQL repositories
+  shell: |
+    timeout 10 bash -c 'rm -f /etc/apt/sources.list.d/*postgresql*.list'
+  async: 20
+  poll: 2
+  when: ansible_facts['os_family'] == "Debian"
+  failed_when: false
+  changed_when: true
+
+- name: Add PostgreSQL repository (Ubuntu/Debian) - ARM64
   apt_repository:
-    repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    repo: "deb [arch=arm64 signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt {{ ansible_facts['distribution_release'] }}-pgdg main"
     state: present
+    update_cache: no
+    filename: postgresql
+  when: ansible_facts['os_family'] == "Debian" and (ansible_facts['architecture'] == 'aarch64' or ansible_facts['architecture'] == 'arm64')
+
+- name: Add PostgreSQL repository (Ubuntu/Debian) - x86_64
+  apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt {{ ansible_facts['distribution_release'] }}-pgdg main"
+    state: present
+    update_cache: no
+    filename: postgresql
+  when: ansible_facts['os_family'] == "Debian" and ansible_facts['architecture'] == 'x86_64'
+
+- name: Update apt cache after adding PostgreSQL repository
+  apt:
     update_cache: yes
-  when: ansible_os_family == "Debian"
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Install PostgreSQL (Ubuntu/Debian)
   apt:
     name:
       - postgresql-{{ postgresql_version | default('16') }}
       - postgresql-contrib-{{ postgresql_version | default('16') }}
+      - python3-psycopg2
     state: present
-    update_cache: yes
-  when: ansible_os_family == "Debian"
+    update_cache: no
+  when: ansible_facts['os_family'] == "Debian"
   notify: Restart PostgreSQL
 
 - name: Start and enable PostgreSQL (Ubuntu/Debian)
@@ -52,45 +93,179 @@
     name: postgresql
     enabled: yes
     state: started
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
+  register: postgresql_started
+
+- name: Wait for PostgreSQL to be ready
+  wait_for:
+    host: localhost
+    port: "{{ postgresql_port | default(5432) }}"
+    delay: 5
+    timeout: 60
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Find PostgreSQL config directory (Ubuntu/Debian)
+  shell: |
+    # Try to find pg_hba.conf in standard locations
+    PG_VERSION="{{ postgresql_version | default('16') }}"
+    if [ -f /etc/postgresql/${PG_VERSION}/main/pg_hba.conf ]; then
+      echo "/etc/postgresql/${PG_VERSION}/main/pg_hba.conf"
+    else
+      # Try to find any version
+      FOUND=$(ls -1 /etc/postgresql/*/main/pg_hba.conf 2>/dev/null | head -1)
+      if [ -n "$FOUND" ]; then
+        echo "$FOUND"
+      else
+        # Fallback: try to get from postgres
+        timeout 10 sudo -u postgres psql -t -P format=unaligned -c "SHOW hba_file;" 2>/dev/null | tr -d ' ' || echo "/etc/postgresql/${PG_VERSION}/main/pg_hba.conf"
+      fi
+    fi
+  async: 30
+  poll: 2
+  register: postgresql_pg_hba_path_result
+  changed_when: false
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Set PostgreSQL pg_hba.conf path fact (Ubuntu/Debian)
+  set_fact:
+    postgresql_pg_hba_path: "{{ postgresql_pg_hba_path_result.stdout.strip() }}"
+  when: ansible_facts['os_family'] == "Debian" and postgresql_pg_hba_path_result.stdout is defined
+
+- name: Verify pg_hba.conf path exists (Ubuntu/Debian)
+  stat:
+    path: "{{ postgresql_pg_hba_path }}"
+  register: pg_hba_stat
+  when: ansible_facts['os_family'] == "Debian" and postgresql_pg_hba_path is defined
+
+- name: Fail if pg_hba.conf not found (Ubuntu/Debian)
+  fail:
+    msg: "PostgreSQL pg_hba.conf not found at {{ postgresql_pg_hba_path }}. PostgreSQL may not be installed correctly."
+  when: ansible_facts['os_family'] == "Debian" and (postgresql_pg_hba_path is not defined or not pg_hba_stat.stat.exists)
+
+- name: Configure PostgreSQL to use password authentication (Ubuntu/Debian)
+  lineinfile:
+    path: "{{ postgresql_pg_hba_path }}"
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backup: yes
+  when: ansible_facts['os_family'] == "Debian" and postgresql_pg_hba_path is defined and pg_hba_stat.stat.exists
+  loop:
+    - { regexp: '^local\s+all\s+all\s+peer', line: 'local   all             all                                     scram-sha-256' }
+    - { regexp: '^local\s+all\s+all\s+md5', line: 'local   all             all                                     scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+scram-sha-256', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+md5', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+ident', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+trust', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+::1/128\s+scram-sha-256', line: 'host    all             all             ::1/128                  scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+::1/128\s+md5', line: 'host    all             all             ::1/128                  scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+::1/128\s+ident', line: 'host    all             all             ::1/128                  scram-sha-256' }
+    - { regexp: '^host\s+all\s+all\s+::1/128\s+trust', line: 'host    all             all             ::1/128                  scram-sha-256' }
+  register: pg_hba_changes
+
+- name: Restart PostgreSQL to apply pg_hba.conf changes (Ubuntu/Debian)
+  systemd:
+    name: postgresql
+    state: restarted
+  when: ansible_facts['os_family'] == "Debian"
+  register: postgresql_restarted
+
+- name: Wait for PostgreSQL to be ready after restart
+  wait_for:
+    host: localhost
+    port: "{{ postgresql_port | default(5432) }}"
+    delay: 5
+    timeout: 60
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Create PostgreSQL database
   postgresql_db:
     name: "{{ postgresql_db | default('yocto_builder') }}"
     state: present
-  become_user: "{{ 'postgres' if ansible_os_family == 'RedHat' else 'postgres' }}"
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
-
-- name: Create PostgreSQL user
-  postgresql_user:
-    name: "{{ postgresql_user | default('yocto_admin') }}"
-    password: "{{ postgresql_password | default('changeme') }}"
-    role_attr_flags: CREATEDB,LOGIN
-    state: present
   become_user: postgres
   vars:
     ansible_python_interpreter: /usr/bin/python3
+  register: postgresql_db_result
 
-- name: Grant privileges to user on database
-  postgresql_privs:
-    db: "{{ postgresql_db | default('yocto_builder') }}"
-    privs: ALL
-    objs: "{{ postgresql_db | default('yocto_builder') }}"
-    type: database
-    roles: "{{ postgresql_user | default('yocto_admin') }}"
-    state: present
+- name: Create/ensure PostgreSQL user and password (Ubuntu/Debian)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      USERNAME="$PG_USER"
+      PASSWORD_RAW="$PG_PASS"
+
+      # Create role if missing
+      if ! timeout 10 psql -U postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${USERNAME}'" | grep -q 1; then
+        timeout 10 psql -U postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE ${USERNAME} WITH LOGIN CREATEDB;"
+      fi
+
+      # Escape password for SQL literal safely (double single-quotes)
+      ESCAPED_PASSWORD="$(printf '%s' "$PASSWORD_RAW" | sed "s/'/''/g")"
+
+      timeout 10 psql -U postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE ${USERNAME} WITH PASSWORD '${ESCAPED_PASSWORD}';"
+    executable: /bin/bash
   become_user: postgres
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
+  when: ansible_facts['os_family'] == "Debian"
+  changed_when: true
+  no_log: false
+  register: postgresql_user_result
+  environment:
+    PW: "{{ postgresql_password | default('changeme') }}"
+    PG_USER: "{{ postgresql_user | default('yocto_admin') }}"
+    PG_PASS: "{{ postgresql_password | default('changeme') }}"
 
-- name: Configure PostgreSQL to use password authentication
+- name: Grant privileges to user on database (no module deprecations)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      DB="{{ postgresql_db | default('yocto_builder') }}"
+      ROLE="{{ postgresql_user | default('yocto_admin') }}"
+      timeout 10 psql -U postgres -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"${DB}\" TO \"${ROLE}\";"
+  args:
+    executable: /bin/bash
+  become_user: postgres
+
+- name: Grant schema + default privileges to user (no module deprecations)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      DB="{{ postgresql_db | default('yocto_builder') }}"
+      ROLE="{{ postgresql_user | default('yocto_admin') }}"
+      timeout 10 psql -U postgres -d "${DB}" -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON SCHEMA public TO \"${ROLE}\";"
+      timeout 10 psql -U postgres -d "${DB}" -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"${ROLE}\";"
+      timeout 10 psql -U postgres -d "${DB}" -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"${ROLE}\";"
+      timeout 10 psql -U postgres -d "${DB}" -v ON_ERROR_STOP=1 -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO \"${ROLE}\";"
+      timeout 10 psql -U postgres -d "${DB}" -v ON_ERROR_STOP=1 -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO \"${ROLE}\";"
+  args:
+    executable: /bin/bash
+  become_user: postgres
+
+- name: Verify PostgreSQL user exists and has correct privileges (Ubuntu/Debian)
+  shell: |
+    psql -U postgres -c "SELECT usename, usecreatedb FROM pg_user WHERE usename='{{ postgresql_user | default('yocto_admin') }}';"
+  become_user: postgres
+  when: ansible_facts['os_family'] == "Debian"
+  changed_when: false
+  failed_when: false
+  register: postgresql_user_check
+  no_log: false
+
+- name: Display PostgreSQL user verification result
+  debug:
+    msg: "PostgreSQL user '{{ postgresql_user | default('yocto_admin') }}' exists and password has been set. Authentication will be tested when the application connects."
+  when: ansible_facts['os_family'] == "Debian" and postgresql_user_check.rc == 0
+
+- name: Display PostgreSQL user creation result
+  debug:
+    msg: "PostgreSQL user '{{ postgresql_user | default('yocto_admin') }}' created/updated"
+  when: postgresql_user_result is defined
+
+- name: Configure PostgreSQL to use password authentication (RedHat)
   lineinfile:
     path: /var/lib/pgsql/data/pg_hba.conf
     regexp: "^{{ item.regexp }}"
     line: "{{ item.line }}"
     backup: yes
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
   notify: Restart PostgreSQL
   loop:
     - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+ident', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }

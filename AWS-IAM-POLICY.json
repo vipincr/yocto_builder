@@ -8,6 +8,7 @@
         "ec2:RunInstances",
         "ec2:DescribeInstances",
         "ec2:DescribeInstanceStatus",
+        "ec2:DescribeAvailabilityZones",
         "ec2:TerminateInstances",
         "ec2:StartInstances",
         "ec2:StopInstances",
@@ -23,9 +24,31 @@
         "ec2:AssociateAddress",
         "ec2:ReleaseAddress",
         "ec2:DescribeAddresses",
-        "ec2:CreateTags",
         "ec2:DescribeTags",
         "ec2:ModifyInstanceAttribute"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2Tagging",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ],
+      "Resource": [
+        "arn:aws:ec2:*:*:instance/*",
+        "arn:aws:ec2:*:*:volume/*",
+        "arn:aws:ec2:*:*:network-interface/*",
+        "arn:aws:ec2:*:*:security-group/*",
+        "arn:aws:ec2:*:*:subnet/*"
+      ]
+    },
+    {
+      "Sid": "STSDebug",
+      "Effect": "Allow",
+      "Action": [
+        "sts:DecodeAuthorizationMessage"
       ],
       "Resource": "*"
     },
@@ -51,7 +74,10 @@
         "ssm:GetParameters",
         "ssm:DescribeParameters"
       ],
-      "Resource": "arn:aws:ssm:*:*:parameter/aws/service/ami-*"
+      "Resource": [
+        "arn:aws:ssm:*:*:parameter/aws/service/ami-*",
+        "arn:aws:ssm:*:*:parameter/aws/service/canonical/ubuntu/server/*"
+      ]
     }
   ]
 }

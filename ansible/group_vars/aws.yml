@@ -3,7 +3,8 @@
 aws_region: "ap-south-1"
 instance_type: "m5.2xlarge"
 key_name: "ec2_vipinr"
-key_path: "{{ playbook_dir }}/../.secrets/ec2_vipinr.pem"
+# playbook_dir is ansible/playbooks; go up twice to repo root
+key_path: "{{ playbook_dir | dirname | dirname }}/.secrets/ec2_vipinr.pem"
 security_group_name: "yocto-builder-sg"
 instance_name: "yocto-builder"
 
@@ -11,15 +12,39 @@ instance_name: "yocto-builder"
 # Change this to your public IP or specific CIDR
 ssh_allowed_cidr: "0.0.0.0/0"  # WARNING: Change this to your IP for production
 
+# Deployment Configuration
+deployment_type: prebuilt
+app_repo: ""  # Not used for prebuilt deployment
+app_branch: main
+
 # Nginx configuration
-nginx_server_name: "{{ ec2_public_ip | default('localhost') }}"
-nginx_ssl_enabled: true
-ssl_email: "admin@example.com"  # Change to your email for Let's Encrypt
+nginx_server_name: "{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
+nginx_ssl_enabled: "{{ lookup('env', 'NGINX_SSL_ENABLED') | default('true') | bool }}"
+skip_nginx: false
+ssl_email: "{{ lookup('env', 'SSL_EMAIL') | default('admin@example.com') }}"
 
 # Application URLs (will be updated after instance creation)
-nextauth_url: "https://{{ nginx_server_name }}"
+nextauth_url: "{{ 'https://' if nginx_ssl_enabled else 'http://' }}{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
 
 # Override builds directory for AWS
 builds_directory: "/data/builds"
 logs_directory: "/var/log/yocto_builder"
+
+# Database Configuration
+# NOTE: lookup('env', ...) returns "" when unset; default(..., true) treats "" as undefined.
+postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD', default='') | default(postgresql_password, true) }}"
+
+# OAuth Configuration
+github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default(github_client_id | default('')) }}"
+github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default(github_client_secret | default('')) }}"
+google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default(google_client_id | default('')) }}"
+google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default(google_client_secret | default('')) }}"
+nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default(nextauth_secret | default('changeme-secret-key-change-in-production')) }}"
+
+# Production resource requirements
+min_cpus: 8
+min_memory_gb: 32
+min_storage_gb: 1000
+build_container_cpus: 6
+build_container_memory: "28g"
 

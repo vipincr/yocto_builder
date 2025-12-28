@@ -3,30 +3,17 @@
   hosts: "{{ target_hosts | default('aws_ec2_instances') }}"
   become: yes
   
+  vars_files:
+    - ../group_vars/all.yml
+  
   vars:
+    # AWS-specific overrides
     nginx_server_name: "{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
     nextauth_url: "{{ 'https://' if nginx_ssl_enabled | default(false) else 'http://' }}{{ hostvars[inventory_hostname]['public_ip'] | default(ansible_host) }}"
-    builds_directory: "{{ lookup('env', 'BUILDS_DIRECTORY') | default('/data/builds') }}"
-    logs_directory: "{{ lookup('env', 'LOGS_DIRECTORY') | default('/var/log/yocto_builder') }}"
-    key_path: "{{ lookup('env', 'AWS_EC2_KEY_PATH') | default('../../.secrets/ec2_vipinr.pem') }}"
-    app_repo: "{{ lookup('env', 'APP_REPO') | default('https://github.com/your-org/yocto_builder.git') }}"
-    app_branch: "{{ lookup('env', 'APP_BRANCH') | default('main') }}"
-    app_user: "{{ lookup('env', 'APP_USER') | default('yocto') }}"
-    app_group: "{{ lookup('env', 'APP_GROUP') | default('yocto') }}"
-    app_home: "{{ lookup('env', 'APP_HOME') | default('/opt/yocto_builder') }}"
-    postgresql_user: "{{ lookup('env', 'POSTGRESQL_USER') | default('yocto_admin') }}"
-    postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default('changeme') }}"
-    postgresql_host: "{{ lookup('env', 'POSTGRESQL_HOST') | default('localhost') }}"
-    postgresql_port: "{{ lookup('env', 'POSTGRESQL_PORT') | default('5432') | int }}"
-    postgresql_db: "{{ lookup('env', 'POSTGRESQL_DB') | default('yocto_builder') }}"
-    nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default('changeme-secret-key-change-in-production') }}"
-    github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default('') }}"
-    github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default('') }}"
-    google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default('') }}"
-    google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default('') }}"
-    build_container_cpus: "{{ lookup('env', 'BUILD_CONTAINER_CPUS') | default(6) | int }}"
-    build_container_memory: "{{ lookup('env', 'BUILD_CONTAINER_MEMORY') | default('28g') }}"
-    pm2_instances: "{{ lookup('env', 'PM2_INSTANCES') | default(1) | int }}"
+    app_repo: "{{ lookup('env', 'APP_REPO') | default(app_repo) }}"
+    app_branch: "{{ lookup('env', 'APP_BRANCH') | default(app_branch | default('main')) }}"
+    # NOTE: lookup('env', ...) returns "" when unset; default(..., true) treats "" as undefined.
+    postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default(postgresql_password, true) }}"
     nginx_ssl_enabled: "{{ lookup('env', 'NGINX_SSL_ENABLED') | default('false') | bool }}"
 
   pre_tasks:

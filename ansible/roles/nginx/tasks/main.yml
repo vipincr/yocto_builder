@@ -3,14 +3,14 @@
   yum:
     name: nginx
     state: present
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Install nginx (Ubuntu/Debian)
   apt:
     name: nginx
     state: present
     update_cache: yes
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Install certbot for SSL (Amazon Linux)
   yum:
@@ -18,7 +18,7 @@
       - certbot
       - python3-certbot-nginx
     state: present
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Install certbot for SSL (Ubuntu/Debian)
   apt:
@@ -26,14 +26,14 @@
       - certbot
       - python3-certbot-nginx
     state: present
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Create nginx configuration directory (Ubuntu/Debian)
   file:
     path: /etc/nginx/sites-available
     state: directory
     mode: '0755'
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Configure nginx for Yocto Builder (Ubuntu/Debian)
   template:
@@ -41,7 +41,7 @@
     dest: /etc/nginx/sites-available/yocto-builder
     mode: '0644'
   notify: Reload nginx
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Configure nginx for Yocto Builder (Amazon Linux)
   template:
@@ -49,7 +49,7 @@
     dest: /etc/nginx/conf.d/yocto-builder.conf
     mode: '0644'
   notify: Reload nginx
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Enable site (Ubuntu/Debian)
   file:
@@ -57,17 +57,19 @@
     dest: /etc/nginx/sites-enabled/yocto-builder
     state: link
   notify: Reload nginx
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Remove default nginx site (Ubuntu/Debian)
   file:
     path: /etc/nginx/sites-enabled/default
     state: absent
   notify: Reload nginx
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Test nginx configuration
-  command: nginx -t
+  command: timeout 10 nginx -t
+  async: 20
+  poll: 2
   register: nginx_test
   changed_when: false
   failed_when: false
@@ -81,12 +83,14 @@
 
 - name: Setup SSL certificate with Let's Encrypt
   command: >
-    certbot --nginx
+    timeout 120 certbot --nginx
     -d {{ nginx_server_name }}
     --non-interactive
     --agree-tos
     --email {{ ssl_email | default('admin@' + nginx_server_name) }}
     --redirect
+  async: 180
+  poll: 10
   register: certbot_result
   when: nginx_ssl_enabled | default(true)
   ignore_errors: yes

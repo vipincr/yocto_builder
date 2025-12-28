@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '10mb',
     },
   },
+  // External packages for server components
+  serverExternalPackages: ['dockerode', 'ssh2'],
   webpack: (config, { isServer }) => {
     if (isServer) {
       // Exclude native modules from server bundle

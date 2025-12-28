@@ -4,6 +4,9 @@
 #secrets 
 .secrets/
 
+#builds
+.build/
+
 # dependencies
 /node_modules
 /.pnp
@@ -16,6 +19,10 @@
 # next.js
 /.next/
 /out/
+
+# local packaging artifacts (deploy.sh)
+/yocto-builder-deploy.tar.gz
+/.build/
 
 # production
 /build
@@ -46,6 +53,11 @@ next-env.d.ts
 # builds and logs
 /builds
 /logs
+
+# ansible runtime artifacts (generated inventories / instance info)
+/ansible/inventory/vagrant.yml
+/ansible/inventory/aws-ec2-static.yml
+/.aws-instance-info
 
 # IDE
 .idea

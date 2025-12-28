@@ -1,14 +1,19 @@
 ---
+- name: Include architecture detection
+  include_tasks: detect-architecture.yml
+
 - name: Verify system requirements
   block:
     - name: Check CPU count
       assert:
-        that: ansible_processor_vcpus | int >= (min_cpus | default(8) | int)
-        msg: "Server must have at least {{ min_cpus | default(8) }} vCPUs"
+        that: ansible_facts['processor_vcpus'] | int >= (min_cpus | default(4) | int)
+        msg: "Server must have at least {{ min_cpus | default(4) }} vCPUs"
+      when: min_cpus is defined
 
     - name: Check memory
       debug:
-        msg: "Server has {{ (ansible_memtotal_mb | int / 1024) | round(1) }}GB RAM (recommended: {{ min_memory_gb | default(32) }}GB)"
+        msg: "Server has {{ (ansible_facts['memtotal_mb'] | int / 1024) | round(1) }}GB RAM (recommended: {{ min_memory_gb | default(8) }}GB)"
+      when: min_memory_gb is defined
 
 - name: Set timezone
   timezone:
@@ -17,13 +22,13 @@
 - name: Update package cache (Amazon Linux)
   yum:
     update_cache: yes
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Update apt cache (Ubuntu/Debian)
   apt:
     update_cache: yes
     cache_valid_time: 3600
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Install essential packages (Amazon Linux)
   yum:
@@ -43,7 +48,7 @@
       - python3-pip
       - acl
     state: present
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Install essential packages (Ubuntu/Debian)
   apt:
@@ -71,7 +76,7 @@
       - acl
       - ufw
     state: present
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Install Yocto build dependencies (Amazon Linux)
   yum:
@@ -90,7 +95,7 @@
       - file
       - glibc-langpack-en
     state: present
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Install Yocto build dependencies (Ubuntu/Debian)
   apt:
@@ -116,20 +121,20 @@
       - file
       - locales
     state: present
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Generate locale (Ubuntu/Debian)
   locale_gen:
     name: "{{ system_locale }}"
     state: present
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Set locale (Amazon Linux)
   lineinfile:
     path: /etc/environment
     line: "LANG={{ system_locale | default('en_US.UTF-8') }}"
     regexp: "^LANG="
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 
 - name: Create application group
   group:
@@ -166,16 +171,17 @@
     - "22"
     - "80"
     - "443"
-  when: ansible_os_family == "Debian"
+    - "3000"  # Application port (for Vagrant and direct access)
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Enable firewall (Ubuntu/Debian)
   ufw:
     state: enabled
     policy: deny
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Configure firewall (Amazon Linux - using security groups)
   debug:
     msg: "Firewall managed by AWS security groups"
-  when: ansible_os_family == "RedHat"
+  when: ansible_facts['os_family'] == "RedHat"
 

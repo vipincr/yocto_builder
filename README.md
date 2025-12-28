@@ -67,10 +67,9 @@ npm install
 
 ### 3. Configure Environment
 
-Copy the example environment file and configure it:
-
 ```bash
-cp .env.example .env
+# Create a local .env (this file is ignored by git)
+touch .env
 ```
 
 Edit `.env` and set the following required variables:
@@ -152,13 +151,12 @@ Use `deploy.sh` for all deployments:
 
 2. **Configure AWS in `.env`:**
    ```bash
-   AWS_ACCESS_KEY_ID="your_access_key"
-   AWS_SECRET_ACCESS_KEY="your_secret_key"
    AWS_REGION="ap-south-1"
    AWS_EC2_INSTANCE_TYPE="m5.2xlarge"
    AWS_EC2_KEY_NAME="your-key-pair-name"
    AWS_EC2_KEY_PATH=".secrets/your-key.pem"
    ```
+   Add your AWS credentials to `.env` (do not commit). `deploy.sh --aws` reads them from `.env`.
 
 3. **Update application repository:**
    ```bash
@@ -258,14 +256,13 @@ yocto_builder/
 ├── docker/                # Docker configurations
 │   └── poky/              # Yocto Poky Dockerfiles (Kirkstone, Scarthgap)
 ├── prisma/                # Database schema and migrations
-├── .env.example           # Environment variables template
 ├── deploy.sh              # Single deployment entrypoint (Vagrant + AWS)
 └── AWS-IAM-POLICY.json    # AWS IAM policy document
 ```
 
 ## Configuration
 
-All configuration is managed through environment variables in `.env`. See `.env.example` for all available options:
+All configuration is managed through environment variables in `.env` (this file is ignored by git):
 
 - **Database**: PostgreSQL connection string
 - **Authentication**: NextAuth URL and secret, OAuth credentials

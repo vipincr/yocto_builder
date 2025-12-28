@@ -202,7 +202,7 @@ deploy_aws() {
   set +a
 
   if [[ -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
-    echo -e "${RED}Error: AWS credentials missing in .env (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY)${NC}" >&2
+    echo -e "${RED}Error: AWS credentials missing in .env${NC}" >&2
     exit 1
   fi
 

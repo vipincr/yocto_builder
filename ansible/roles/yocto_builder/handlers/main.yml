@@ -4,7 +4,7 @@
     pm2 delete yocto-builder || true
     pm2 start ecosystem.config.js --only yocto-builder
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir | default(app_home ~ '/app') }}"
   become: yes
   become_user: "{{ app_user }}"
   listen: restart application

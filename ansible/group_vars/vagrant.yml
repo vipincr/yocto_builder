@@ -7,6 +7,11 @@ deployment_type: vagrant
 app_repo: "/vagrant"
 app_branch: main
 
+# Ensure deterministic uid/gid so VirtualBox shared-folder mount options (uid/gid) match
+# the application runtime user on Vagrant.
+app_user_uid: 1001
+app_group_gid: 1001
+
 # Network Configuration
 nginx_server_name: "localhost"
 nextauth_url: "http://localhost:3000"

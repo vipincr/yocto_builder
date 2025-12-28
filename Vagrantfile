@@ -44,8 +44,15 @@ Vagrant.configure("2") do |config|
   config.vm.network "private_network", ip: "192.168.56.10"
 
   # Sync project directory
-  # Ensure the synced folder is writable by the app user inside the VM
-  config.vm.synced_folder ".", "/vagrant", owner: "yocto", group: "yocto"
+  #
+  # IMPORTANT (Vagrant/VirtualBox shared folders):
+  # - `yocto` does not exist at first boot, so we cannot rely on username-based ownership here.
+  # - Use numeric uid/gid mount options so `/vagrant` is writable by the app user once Ansible
+  #   creates it (Ubuntu boxes: `vagrant` is typically uid 1000, so the next user becomes 1001).
+  #
+  # This prevents permission issues after reboot (PM2 runs the app as `yocto` and needs to read
+  # `.env` and write into `.next`).
+  config.vm.synced_folder ".", "/vagrant", mount_options: ["uid=1001", "gid=1001"]
 
   # Pre-provision: Install Python3 (required for Ansible to connect via SSH)
   config.vm.provision "shell", inline: <<-SHELL

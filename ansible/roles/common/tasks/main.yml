@@ -139,12 +139,14 @@
 - name: Create application group
   group:
     name: "{{ app_group | default('yocto') }}"
+    gid: "{{ app_group_gid | default(omit) }}"
     state: present
 
 - name: Create application user
   user:
     name: "{{ app_user | default('yocto') }}"
     group: "{{ app_group | default('yocto') }}"
+    uid: "{{ app_user_uid | default(omit) }}"
     home: "{{ app_home | default('/opt/yocto_builder') }}"
     shell: /bin/bash
     create_home: yes

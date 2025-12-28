@@ -116,37 +116,6 @@
   when: deployment_type == 'vagrant'
   notify: restart application
 
-- name: Create Vagrant runtime directories (keep build artifacts off the synced folder)
-  file:
-    path: "{{ item }}"
-    state: directory
-    owner: "{{ app_user }}"
-    group: "{{ app_group }}"
-    mode: '0755'
-  loop:
-    - "{{ app_home }}/vagrant_runtime"
-    - "{{ app_home }}/vagrant_runtime/node_modules"
-  when: deployment_type == 'vagrant'
-
-- name: Symlink node_modules into /vagrant (avoid polluting host with linux deps)
-  shell: |
-    set -eu
-    # node_modules
-    if [ -e /vagrant/node_modules ] && [ ! -L /vagrant/node_modules ]; then
-      rm -rf /vagrant/node_modules
-    fi
-    ln -snf {{ app_home }}/vagrant_runtime/node_modules /vagrant/node_modules
-    # IMPORTANT: Do not move .next out of /vagrant in dev mode. Next server code
-    # resolves node_modules by walking up from the .next realpath. Keeping .next
-    # under /vagrant ensures it can find /vagrant/node_modules (which is symlinked).
-    if [ -L /vagrant/.next ]; then
-      rm -f /vagrant/.next
-    fi
-  args:
-    executable: /bin/bash
-  become: yes
-  when: deployment_type == 'vagrant'
-
 - name: Ensure PM2 systemd drop-in directory exists (Vagrant)
   file:
     path: "/etc/systemd/system/pm2-{{ app_user }}.service.d"
@@ -192,6 +161,16 @@
   set_fact:
     database_url: "postgresql://{{ postgresql_user | default('yocto_admin') }}:{{ postgresql_password | default('changeme') | replace('@', '%40') | replace(':', '%3A') | replace('/', '%2F') | replace('?', '%3F') | replace('#', '%23') | replace('[', '%5B') | replace(']', '%5D') }}@{{ postgresql_host | default('localhost') }}:{{ postgresql_port | default(5432) }}/{{ postgresql_db | default('yocto_builder') }}"
 
+- name: Create environment file
+  template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0600'
+  register: env_file
+  notify: restart application
+
 - name: Generate Prisma client
   command: timeout 120 npm run db:generate
   args:
@@ -204,16 +183,6 @@
     DATABASE_URL: "{{ database_url }}"
   register: prisma_generate
   changed_when: "'Generated Prisma Client' in prisma_generate.stdout"
-
-- name: Create environment file
-  template:
-    src: env.j2
-    dest: "{{ app_dir }}/.env"
-    owner: "{{ app_user }}"
-    group: "{{ app_group }}"
-    mode: '0600'
-  register: env_file
-  notify: restart application
 
 - name: Wait for PostgreSQL to be ready
   wait_for:
@@ -258,7 +227,10 @@
   changed_when: "'Compiled successfully' in build_result.stdout or build_result.rc == 0"
   failed_when: build_result.rc != 0
   notify: restart application
-  when: deployment_type == 'remote' and (not build_exists.stat.exists)
+  when:
+    - deployment_type != 'prebuilt'
+    - not build_exists.stat.exists
+    - deployment_type in ['remote', 'vagrant']
 
 - name: Verify prebuilt application has .next directory
   stat:
@@ -274,7 +246,7 @@
 - name: Create PM2 ecosystem file
   template:
     src: ecosystem.config.js.j2
-    dest: "{{ app_home }}/app/ecosystem.config.js"
+    dest: "{{ app_dir }}/ecosystem.config.js"
     owner: "{{ app_user }}"
     group: "{{ app_group }}"
     mode: '0644'
@@ -284,7 +256,7 @@
 - name: Remove existing PM2 process (to apply updated ecosystem config)
   command: pm2 delete yocto-builder
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir }}"
   become: yes
   become_user: "{{ app_user }}"
   failed_when: false
@@ -293,7 +265,7 @@
 - name: Start application under PM2 using ecosystem config
   command: pm2 start ecosystem.config.js --only yocto-builder
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir }}"
   become: yes
   become_user: "{{ app_user }}"
   register: pm2_start_or_restart
@@ -316,7 +288,7 @@
 - name: Verify PM2 application is running
   command: pm2 describe yocto-builder
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir }}"
   become: yes
   become_user: "{{ app_user }}"
   register: pm2_final_status

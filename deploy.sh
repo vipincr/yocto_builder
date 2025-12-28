@@ -214,7 +214,10 @@ deploy_aws() {
     exit 1
   fi
 
-  export AWS_EC2_KEY_PATH="${AWS_EC2_KEY_PATH:-.secrets/${AWS_EC2_KEY_NAME}.pem}"
+  # Resolve key path to an absolute path before we 'cd ansible' (relative paths would break).
+  AWS_EC2_KEY_PATH="${AWS_EC2_KEY_PATH:-.secrets/${AWS_EC2_KEY_NAME}.pem}"
+  AWS_EC2_KEY_PATH="$(python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$AWS_EC2_KEY_PATH")"
+  export AWS_EC2_KEY_PATH
   if [[ ! -f "$AWS_EC2_KEY_PATH" ]]; then
     echo -e "${RED}Error: SSH key not found at $AWS_EC2_KEY_PATH${NC}" >&2
     exit 1
@@ -229,7 +232,7 @@ deploy_aws() {
   fi
 
   echo -e "${YELLOW}Starting full AWS deployment (provision/reuse + deploy)...${NC}"
-  (cd ansible && ansible-playbook playbooks/aws-full-deploy.yml -e platform=aws)
+  (cd ansible && ansible-playbook playbooks/aws-full-deploy.yml -e platform=aws -e "key_path=${AWS_EC2_KEY_PATH}")
 }
 
 case "$MODE" in

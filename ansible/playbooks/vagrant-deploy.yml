@@ -22,10 +22,6 @@
     - ../group_vars/all.yml
 
   pre_tasks:
-    - name: Set ANSIBLE_ROLES_PATH
-      set_fact:
-        ansible_roles_path: "/vagrant/ansible/roles"
-    
     - name: Override min_cpus for Vagrant (development environment)
       set_fact:
         min_cpus: 2

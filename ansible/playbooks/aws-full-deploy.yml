@@ -116,10 +116,10 @@
               aws_ec2_instances:
                 hosts:
                   yocto-builder:
-                    ansible_host: {{ target_instance_ip }}
-                    ansible_user: ubuntu
-                    ansible_ssh_private_key_file: {{ key_path }}
-                    public_ip: {{ target_instance_ip }}
+                    ansible_host: "{{ target_instance_ip | default('') }}"
+                    ansible_user: "ubuntu"
+                    ansible_ssh_private_key_file: "{{ key_path | default('') }}"
+                    public_ip: "{{ target_instance_ip | default('') }}"
         dest: "{{ playbook_dir | dirname }}/inventory/aws-ec2-static.yml"
       delegate_to: localhost
 

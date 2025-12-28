@@ -7,9 +7,10 @@
     group: "{{ app_group }}"
     mode: '0755'
 
-- name: Set deployment type
+- name: Set deployment type (only if not explicitly provided)
   set_fact:
-    deployment_type: "{{ deployment_type | default('vagrant' if app_repo == '/vagrant' else 'remote') }}"
+    deployment_type: "{{ 'vagrant' if (app_repo | default('')) == '/vagrant' else 'remote' }}"
+  when: deployment_type is not defined or (deployment_type | string | trim | length) == 0
 
 - name: Check if prebuilt tarball exists locally
   stat:

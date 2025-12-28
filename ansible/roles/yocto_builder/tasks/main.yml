@@ -31,7 +31,6 @@
     dest: "/tmp/yocto-builder-deploy.tar.gz"
     mode: '0644'
   when: deployment_type == 'prebuilt'
-  delegate_to: localhost
   become: no
 
 - name: Extract prebuilt tarball
@@ -104,12 +103,11 @@
       rm -rf {{ app_home }}/app/builds {{ app_home }}/app/logs {{ app_home }}/app/.env || true
       rm -rf {{ app_home }}/app/.secrets {{ app_home }}/app/.aws-instance-info {{ app_home }}/app/.vagrant || true
     fi
-    # Ensure proper ownership
+    # Ensure proper ownership (requires root, so run as root)
     chown -R {{ app_user }}:{{ app_group }} {{ app_home }}/app
   async: 600
   poll: 10
   become: yes
-  become_user: "{{ app_user }}"
   changed_when: true
   when: deployment_type == 'vagrant'
   notify: restart application

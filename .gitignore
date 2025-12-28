@@ -59,6 +59,14 @@ next-env.d.ts
 /ansible/inventory/aws-ec2-static.yml
 /.aws-instance-info
 
+# deployment notes/status files (should never be committed; may contain secrets)
+/AWS-DEPLOYMENT-*.md
+/AWS-PERMISSIONS-*.md
+/README-AWS.md
+/*DEPLOYMENT-STATUS*.md
+/setup-aws-env.sh
+/deploy-to-existing-instance.sh
+
 # IDE
 .idea
 .vscode

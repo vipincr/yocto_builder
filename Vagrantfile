@@ -44,7 +44,8 @@ Vagrant.configure("2") do |config|
   config.vm.network "private_network", ip: "192.168.56.10"
 
   # Sync project directory
-  config.vm.synced_folder ".", "/vagrant"
+  # Ensure the synced folder is writable by the app user inside the VM
+  config.vm.synced_folder ".", "/vagrant", owner: "yocto", group: "yocto"
 
   # Pre-provision: Install Python3 (required for Ansible to connect via SSH)
   config.vm.provision "shell", inline: <<-SHELL

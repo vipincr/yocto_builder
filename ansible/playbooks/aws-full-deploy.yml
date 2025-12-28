@@ -35,8 +35,16 @@
       include_vars:
         file: "{{ instance_info_file }}"
       when: instance_info_exists.stat.exists
-      register: loaded_instance_info
       failed_when: false
+
+    - name: Set instance variables from cached file (if available)
+      set_fact:
+        target_instance_id: "{{ instance_id }}"
+        target_instance_ip: "{{ public_ip }}"
+      when:
+        - target_instance_id is not defined
+        - instance_id | default('') | length > 0
+        - public_ip | default('') | length > 0
 
     - name: Use existing instance from AWS lookup
       set_fact:
@@ -79,21 +87,18 @@
     - name: Provision new EC2 instance (if no existing instance found)
       include_role:
         name: aws_ec2
-      when: existing_instance.instances | default([]) | length == 0 and (not instance_info_exists.stat.exists or not (loaded_instance_info | default({})).instance_id | default('') | length > 0)
+      when: existing_instance.instances | default([]) | length == 0 and (target_instance_id is not defined or target_instance_ip is not defined)
       tags:
         - provision
 
-    - name: Load instance info after provisioning
-      include_vars:
-        file: "{{ instance_info_file }}"
-      when: not instance_info_exists.stat.exists or not (loaded_instance_info | default({})).instance_id | default('') | length > 0
-      register: new_instance_info
-
-    - name: Set instance variables from file (if not already set from AWS lookup)
+    - name: Set instance variables from provisioning output (if not already set)
       set_fact:
-        target_instance_ip: "{{ (new_instance_info | default({})).public_ip | default((loaded_instance_info | default({})).public_ip | default('')) }}"
-        target_instance_id: "{{ (new_instance_info | default({})).instance_id | default((loaded_instance_info | default({})).instance_id | default('')) }}"
-      when: target_instance_id is not defined
+        target_instance_id: "{{ ec2_instance_id }}"
+        target_instance_ip: "{{ ec2_public_ip }}"
+      when:
+        - target_instance_id is not defined
+        - ec2_instance_id is defined
+        - ec2_public_ip is defined
 
     - name: Fail if no instance IP
       fail:
@@ -115,13 +120,24 @@
             children:
               aws_ec2_instances:
                 hosts:
-                  yocto-builder:
+                  yocto-builder-aws:
                     ansible_host: "{{ target_instance_ip | default('') }}"
-                    ansible_user: "ubuntu"
+                    ansible_port: 22
+                    ansible_user: "ec2-user"
                     ansible_ssh_private_key_file: "{{ key_path | default('') }}"
                     public_ip: "{{ target_instance_ip | default('') }}"
         dest: "{{ playbook_dir | dirname }}/inventory/aws-ec2-static.yml"
       delegate_to: localhost
+
+    - name: Add target instance to in-memory inventory for this run
+      add_host:
+        name: yocto-builder-aws
+        groups: aws_ec2_instances
+        ansible_host: "{{ target_instance_ip }}"
+        ansible_port: 22
+        ansible_user: "ec2-user"
+        ansible_ssh_private_key_file: "{{ key_path }}"
+        public_ip: "{{ target_instance_ip }}"
 
     - name: Wait for SSH to be available
       wait_for:
@@ -165,7 +181,7 @@
           - "=========================================="
           - "Instance: {{ inventory_hostname }} ({{ ansible_host }})"
           - "Application URL: {{ nextauth_url }}"
-          - "SSH: ssh -i {{ key_path }} ubuntu@{{ ansible_host }}"
+          - "SSH: ssh -i {{ key_path }} ec2-user@{{ ansible_host }}"
           - "PM2 Status: Check with 'pm2 list' on the server"
           - ""
           - "Next steps:"

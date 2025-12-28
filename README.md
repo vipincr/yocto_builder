@@ -43,6 +43,27 @@ The easiest way to get started is using Vagrant, which sets up a complete develo
 
 The application will be available at **http://localhost:3000** once provisioning completes.
 
+**Important Vagrant notes (dev mode):**
+- **Runs in dev mode on the VM**: PM2 starts the app using `npm run dev` for fast iteration/hot reload.
+- **Boot recovery**: after a VM reboot, systemd starts `pm2-yocto`, which resurrects the app automatically.
+- **After changing `Vagrantfile`** (e.g. synced-folder options): run `vagrant reload` to apply changes.
+- **Native deps safety**: on Vagrant we keep Linux `node_modules` inside the VM (and symlink it into `/vagrant`)
+  to avoid macOS/Linux native module mismatches (e.g. `esbuild`).
+
+**Useful commands:**
+```bash
+# Re-apply Ansible to an already-running VM (recommended after code/ansible changes)
+./deploy.sh --no-up
+
+# Reboot VM (validates boot recovery)
+vagrant reload
+
+# Inside VM: inspect app/process status
+vagrant ssh -c "systemctl status pm2-yocto --no-pager"
+vagrant ssh -c "sudo -u yocto pm2 list"
+vagrant ssh -c "sudo -u yocto pm2 logs yocto-builder --lines 200 --nostream"
+```
+
 **Vagrant Details:**
 - Uses ARM64 Ubuntu 24.04 box (`net9/ubuntu-24.04-arm64`) on ARM Macs
 - Uses x86_64 Ubuntu 22.04 box (`ubuntu/jammy64`) on Intel Macs
@@ -185,17 +206,13 @@ The deployment is **fully automated** and **idempotent** (safe to run multiple t
 4. Builds the Next.js application **locally** and uploads a prebuilt tarball (no server-side build)
 5. Generates Prisma client (server)
 6. Runs database migrations (server)
-9. Configures Nginx as reverse proxy
-10. Starts application with PM2
-11. Sets up PM2 to start on boot
+7. Configures Nginx as reverse proxy
+8. Starts application with PM2 (**production mode**: `next start`)
+9. Ensures `pm2-yocto` is enabled so the app comes back after reboot
 
 **Subsequent deployments (updates):**
-1. Updates repository (git pull)
-2. Reinstalls dependencies if needed
-3. Regenerates Prisma client
-4. Runs new migrations
-5. Rebuilds application
-6. Restarts PM2 service
+- Rebuilds the app **locally** and uploads a fresh tarball
+- Applies migrations and restarts the PM2 process
 
 All configuration is managed through Ansible playbooks - no manual commands or scripts needed!
 
@@ -326,9 +343,10 @@ lsof -ti:3000 | xargs kill -9
 
 **Check deployment status:**
 ```bash
-ssh -i .secrets/ec2_vipinr.pem ubuntu@<instance-ip>
+ssh -i .secrets/ec2_vipinr.pem ec2-user@<instance-ip>
 sudo -u yocto pm2 list
 sudo -u yocto pm2 logs yocto-builder
+sudo systemctl status pm2-yocto --no-pager
 ```
 
 **Check service status:**

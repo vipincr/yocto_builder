@@ -12,6 +12,10 @@
     deployment_type: "{{ 'vagrant' if (app_repo | default('')) == '/vagrant' else 'remote' }}"
   when: deployment_type is not defined or (deployment_type | string | trim | length) == 0
 
+- name: Set app_dir for this deployment
+  set_fact:
+    app_dir: "{{ '/vagrant' if deployment_type == 'vagrant' else (app_home ~ '/app') }}"
+
 - name: Check if prebuilt tarball exists locally
   stat:
     path: "{{ playbook_dir | dirname | dirname }}/yocto-builder-deploy.tar.gz"
@@ -112,9 +116,70 @@
   when: deployment_type == 'vagrant'
   notify: restart application
 
+- name: Create Vagrant runtime directories (keep build artifacts off the synced folder)
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  loop:
+    - "{{ app_home }}/vagrant_runtime"
+    - "{{ app_home }}/vagrant_runtime/node_modules"
+  when: deployment_type == 'vagrant'
+
+- name: Symlink node_modules into /vagrant (avoid polluting host with linux deps)
+  shell: |
+    set -eu
+    # node_modules
+    if [ -e /vagrant/node_modules ] && [ ! -L /vagrant/node_modules ]; then
+      rm -rf /vagrant/node_modules
+    fi
+    ln -snf {{ app_home }}/vagrant_runtime/node_modules /vagrant/node_modules
+    # IMPORTANT: Do not move .next out of /vagrant in dev mode. Next server code
+    # resolves node_modules by walking up from the .next realpath. Keeping .next
+    # under /vagrant ensures it can find /vagrant/node_modules (which is symlinked).
+    if [ -L /vagrant/.next ]; then
+      rm -f /vagrant/.next
+    fi
+  args:
+    executable: /bin/bash
+  become: yes
+  when: deployment_type == 'vagrant'
+
+- name: Ensure PM2 systemd drop-in directory exists (Vagrant)
+  file:
+    path: "/etc/systemd/system/pm2-{{ app_user }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: yes
+  when: deployment_type == 'vagrant'
+
+- name: Ensure PM2 starts only after /vagrant is mounted (Vagrant boot ordering)
+  copy:
+    dest: "/etc/systemd/system/pm2-{{ app_user }}.service.d/override.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Service]
+      # Vagrant mounts /vagrant after boot; PM2 may start too early and fail to find package.json/node_modules.
+      # Wait until the synced folder is present before resurrecting processes.
+      ExecStartPre=/bin/bash -lc 'for i in {1..120}; do [ -f /vagrant/package.json ] && exit 0; sleep 2; done; echo \"ERROR: /vagrant/package.json not found\"; exit 1'
+  become: yes
+  when: deployment_type == 'vagrant'
+
+- name: Reload systemd to pick up PM2 override (Vagrant)
+  systemd:
+    daemon_reload: yes
+  become: yes
+  when: deployment_type == 'vagrant'
+
 - name: Install Node.js dependencies
   npm:
-    path: "{{ app_home }}/app"
+    path: "{{ app_dir }}"
     state: present
     production: "{{ deployment_type == 'prebuilt' }}"
   become: yes
@@ -130,7 +195,7 @@
 - name: Generate Prisma client
   command: timeout 120 npm run db:generate
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir }}"
   async: 180
   poll: 5
   become: yes
@@ -143,7 +208,7 @@
 - name: Create environment file
   template:
     src: env.j2
-    dest: "{{ app_home }}/app/.env"
+    dest: "{{ app_dir }}/.env"
     owner: "{{ app_user }}"
     group: "{{ app_group }}"
     mode: '0600'
@@ -161,7 +226,7 @@
 - name: Run Prisma migrations
   command: timeout 60 npm run db:deploy
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir }}"
   async: 90
   poll: 5
   become: yes
@@ -174,14 +239,14 @@
 
 - name: Check if build directory exists
   stat:
-    path: "{{ app_home }}/app/.next"
+    path: "{{ app_dir }}/.next"
   register: build_exists
   when: deployment_type != 'prebuilt'
 
 - name: Build Next.js application
   command: timeout 600 npm run build
   args:
-    chdir: "{{ app_home }}/app"
+    chdir: "{{ app_dir }}"
   async: 900
   poll: 30
   become: yes
@@ -193,7 +258,7 @@
   changed_when: "'Compiled successfully' in build_result.stdout or build_result.rc == 0"
   failed_when: build_result.rc != 0
   notify: restart application
-  when: deployment_type != 'prebuilt' and (not build_exists.stat.exists or deployment_type == 'vagrant')
+  when: deployment_type == 'remote' and (not build_exists.stat.exists)
 
 - name: Verify prebuilt application has .next directory
   stat:
@@ -240,12 +305,13 @@
   become_user: "{{ app_user }}"
   when: pm2_start_or_restart is defined and pm2_start_or_restart.rc == 0
 
-- name: Ensure PM2 starts on boot
-  command: pm2 startup systemd -u "{{ app_user }}" --hp "{{ app_home }}"
+- name: Ensure PM2 systemd service is enabled and started (boot recovery)
+  systemd:
+    name: "pm2-{{ app_user }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
   become: yes
-  become_user: "{{ app_user }}"
-  register: pm2_startup
-  failed_when: false
 
 - name: Verify PM2 application is running
   command: pm2 describe yocto-builder

@@ -32,14 +32,15 @@ logs_directory: "/var/log/yocto_builder"
 
 # Database Configuration
 # NOTE: lookup('env', ...) returns "" when unset; default(..., true) treats "" as undefined.
-postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default(postgresql_password, true) }}"
+# Avoid recursive self-reference in group_vars; fall back to a safe default.
+postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default('changeme', true) }}"
 
 # OAuth Configuration
-github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default(github_client_id | default('')) }}"
-github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default(github_client_secret | default('')) }}"
-google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default(google_client_id | default('')) }}"
-google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default(google_client_secret | default('')) }}"
-nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default(nextauth_secret | default('changeme-secret-key-change-in-production')) }}"
+github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default('', true) }}"
+github_client_secret: "{{ lookup('env', 'GITHUB_CLIENT_SECRET') | default('', true) }}"
+google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default('', true) }}"
+google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default('', true) }}"
+nextauth_secret: "{{ lookup('env', 'NEXTAUTH_SECRET') | default('changeme-secret-key-change-in-production', true) }}"
 
 # Production resource requirements
 min_cpus: 8

@@ -104,3 +104,10 @@
   async: 60
   poll: 5
 
+- name: Enable and start PM2 service (restart-safe)
+  systemd:
+    name: "pm2-{{ app_user | default('yocto') }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+

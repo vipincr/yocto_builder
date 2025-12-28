@@ -99,5 +99,5 @@
   systemd:
     name: nginx
     state: reloaded
-  when: certbot_result.rc == 0
+  when: certbot_result is defined and certbot_result.rc is defined and certbot_result.rc == 0
 

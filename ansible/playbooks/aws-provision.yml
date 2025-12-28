@@ -80,5 +80,5 @@
           - "EC2 Instance created successfully!"
           - "Instance ID: {{ hostvars[groups['aws_ec2_instances'][0]]['instance_id'] }}"
           - "Public IP: {{ hostvars[groups['aws_ec2_instances'][0]]['public_ip'] }}"
-          - "SSH: ssh -i {{ resolved_key_path }} ubuntu@{{ hostvars[groups['aws_ec2_instances'][0]]['public_ip'] }}"
+          - "SSH: ssh -i {{ resolved_key_path }} ec2-user@{{ hostvars[groups['aws_ec2_instances'][0]]['public_ip'] }}"
           - "Next: Run 'ansible-playbook -i inventory/aws-ec2-static.yml playbooks/aws-deploy.yml' to deploy"

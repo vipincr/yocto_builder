@@ -186,7 +186,7 @@
     ansible_python_interpreter: /usr/bin/python3
   register: postgresql_db_result
 
-- name: Create/ensure PostgreSQL user and password (Ubuntu/Debian)
+- name: Create/ensure PostgreSQL user and password
   ansible.builtin.shell:
     cmd: |
       set -euo pipefail
@@ -204,7 +204,6 @@
       timeout 10 psql -U postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE ${USERNAME} WITH PASSWORD '${ESCAPED_PASSWORD}';"
     executable: /bin/bash
   become_user: postgres
-  when: ansible_facts['os_family'] == "Debian"
   changed_when: true
   no_log: false
   register: postgresql_user_result
@@ -270,3 +269,9 @@
   loop:
     - { regexp: '^host\s+all\s+all\s+127\.0\.0\.1/32\s+ident', line: 'host    all             all             127.0.0.1/32                 scram-sha-256' }
     - { regexp: '^host\s+all\s+all\s+::1/128\s+ident', line: 'host    all             all             ::1/128                  scram-sha-256' }
+
+- name: Reload PostgreSQL to apply pg_hba.conf changes (RedHat)
+  systemd:
+    name: postgresql
+    state: reloaded
+  when: ansible_facts['os_family'] == "RedHat"

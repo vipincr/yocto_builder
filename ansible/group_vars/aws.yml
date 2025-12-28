@@ -32,7 +32,7 @@ logs_directory: "/var/log/yocto_builder"
 
 # Database Configuration
 # NOTE: lookup('env', ...) returns "" when unset; default(..., true) treats "" as undefined.
-postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD', default='') | default(postgresql_password, true) }}"
+postgresql_password: "{{ lookup('env', 'POSTGRESQL_PASSWORD') | default(postgresql_password, true) }}"
 
 # OAuth Configuration
 github_client_id: "{{ lookup('env', 'GITHUB_CLIENT_ID') | default(github_client_id | default('')) }}"
